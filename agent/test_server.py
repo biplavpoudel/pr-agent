@@ -5,16 +5,12 @@ Unit tests for Module 1: Basic MCP Server
 
 import json
 import pytest
-import asyncio
-from pathlib import Path
-from unittest.mock import patch, MagicMock, AsyncMock
-from server import (
-    mcp,
+from unittest.mock import patch, MagicMock
+from agent.mcp_server import (
     analyze_file_changes,
     get_pr_templates,
     suggest_template,
-    create_default_template,
-    TEMPLATES_DIR
+    create_default_template
 )
 
 

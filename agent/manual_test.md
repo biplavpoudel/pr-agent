@@ -240,7 +240,7 @@ cat github_events.json
 ### MCP Server Issues
 ```bash
 # Check if MCP server is responding
-# Should see server startup messages when running uv run server.py
+# Should see server startup messages when running uv run mcp_server.py
 ```
 
 ### Slack Issues

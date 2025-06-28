@@ -1,8 +1,4 @@
 #!/usr/bin/env python3
-"""
-Module 3: Slack Notification Integration - Complete Solution
-Combines all MCP primitives (Tools and Prompts) for complete team communication workflows.
-"""
 
 import json
 import os
@@ -13,11 +9,10 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-# Initialize the FastMCP server
-mcp = FastMCP("pr-agent-slack")
+# Initializing the FastMCP server
+mcp = FastMCP("pr_agent")
 
-# PR template directory (shared between starter and solution)
-TEMPLATES_DIR = Path(__file__).parent.parent.parent / "templates"
+TEMPLATES_DIR = Path(__file__).parent.parent/ "templates"
 
 # Default PR templates
 DEFAULT_TEMPLATES = {
