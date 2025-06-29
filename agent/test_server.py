@@ -109,7 +109,7 @@ class TestSuggestTemplate:
         )
         
         suggestion = json.loads(result)
-        assert suggestion["recommended_template"]["filename"] == "bug.md"
+        assert suggestion["recommended_template"]["filename"] == "bug_fix.md"
         assert "Bug Fix" in suggestion["recommended_template"]["type"]
         assert "reasoning" in suggestion
     
@@ -137,9 +137,9 @@ class TestSuggestTemplate:
         
         # Test variations
         for change_type, expected_file in [
-            ("fix", "bug.md"),
+            ("fix", "bug_fix.md"),
             ("enhancement", "feature.md"),
-            ("documentation", "docs.md"),
+            ("documentation", "documentation.md"),
             ("cleanup", "refactor.md"),
             ("testing", "test.md"),
             ("optimization", "performance.md")

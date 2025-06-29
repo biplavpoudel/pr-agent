@@ -8,45 +8,30 @@ from typing import Optional
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
+import logging
 
 # Initializing the FastMCP server
 mcp = FastMCP("pr_agent")
 
 TEMPLATES_DIR = Path(__file__).parent.parent/ "templates"
+EVENTS_FILE = Path(__file__).parent / "events_git.json"
 
-# Default PR templates
+# Dynamic Loading of default PR templates.
 DEFAULT_TEMPLATES = {
-    "bug.md": "Bug Fix",
-    "feature.md": "Feature",
-    "docs.md": "Documentation",
-    "refactor.md": "Refactor",
-    "test.md": "Test",
-    "performance.md": "Performance",
-    "security.md": "Security"
+    file: file.split(".")[0].capitalize().replace("_", " ")
+    for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
 }
-
-# File where webhook server stores events
-EVENTS_FILE = Path(__file__).parent / "github_events.json"
 
 # Type mapping for PR templates
 TYPE_MAPPING = {
-    "bug": "bug.md",
-    "fix": "bug.md",
-    "feature": "feature.md",
-    "enhancement": "feature.md",
-    "docs": "docs.md",
-    "documentation": "docs.md",
-    "refactor": "refactor.md",
-    "cleanup": "refactor.md",
-    "test": "test.md",
-    "testing": "test.md",
-    "performance": "performance.md",
-    "optimization": "performance.md",
-    "security": "security.md"
+    "Bug fix": ["bug", "fix"],
+    "Feature": ["feature", "enhancement"],
+    "Documentation": ["docs", "documentation"],
+    "Refactor": ["refactor", "cleanup"],
+    "Test": ["test", "testing"],
+    "Performance": ["performance", "optimization"],
+    "Security": ["security"]
 }
-
-
-# ===== Tools from Modules 1 & 2 (Complete with output limiting) =====
 
 @mcp.tool()
 async def analyze_file_changes(
@@ -55,7 +40,7 @@ async def analyze_file_changes(
     max_diff_lines: int = 500,
     working_directory: Optional[str] = None
 ) -> str:
-    """Get the full diff and list of changed files in the current git repository.
+    """Gets the full diff and list of changed files in the current git repository.
     
     Args:
         base_branch: Base branch to compare against (default: main)
@@ -64,23 +49,24 @@ async def analyze_file_changes(
         working_directory: Directory to run git commands in (default: current directory)
     """
     try:
-        # Try to get working directory from roots first
+        # Trying to get working directory from roots
         if working_directory is None:
             try:
                 context = mcp.get_context()
                 roots_result = await context.session.list_roots()
-                # Get the first root - Claude Code sets this to the CWD
                 root = roots_result.roots[0]
-                # FileUrl object has a .path property that gives us the path directly
                 working_directory = root.uri.path
-            except Exception:
+                logging.info(f"Working directory: {working_directory}")
+            except RuntimeError as e:
                 # If we can't get roots, fall back to current directory
+                logging.error(f"Runtime context error: {str(e)}")
                 pass
         
-        # Use provided working directory or current directory
+        # Using provided working directory else current directory
         cwd = working_directory if working_directory else os.getcwd()
-        # Get list of changed files
-        files_result = subprocess.run(
+
+        # List of changed files
+        diff_files = subprocess.run(
             ["git", "diff", "--name-status", f"{base_branch}...HEAD"],
             capture_output=True,
             text=True,
@@ -88,7 +74,7 @@ async def analyze_file_changes(
             cwd=cwd
         )
         
-        # Get diff statistics
+        # Diff statistics
         stat_result = subprocess.run(
             ["git", "diff", "--stat", f"{base_branch}...HEAD"],
             capture_output=True,
@@ -96,7 +82,7 @@ async def analyze_file_changes(
             cwd=cwd
         )
         
-        # Get the actual diff if requested
+        # Complete diff if requested
         diff_content = ""
         truncated = False
         if include_diff:
@@ -108,16 +94,17 @@ async def analyze_file_changes(
             )
             diff_lines = diff_result.stdout.split('\n')
             
-            # Check if we need to truncate
+            # MCP tools have a token limit of 25k. Git diffs for larger projects can exceed this limit.
+            # So using truncation to limit the `git diff` content.
             if len(diff_lines) > max_diff_lines:
                 diff_content = '\n'.join(diff_lines[:max_diff_lines])
-                diff_content += f"\n\n... Output truncated. Showing {max_diff_lines} of {len(diff_lines)} lines ..."
-                diff_content += "\n... Use max_diff_lines parameter to see more ..."
+                diff_content += f"\n\nShowing {max_diff_lines} of {len(diff_lines)} lines ..."
+                diff_content += "\nIncrease the value of max_diff_lines parameter for more ..."
                 truncated = True
             else:
                 diff_content = diff_result.stdout
         
-        # Get commit messages for context
+        # Commit messages for context
         commits_result = subprocess.run(
             ["git", "log", "--oneline", f"{base_branch}..HEAD"],
             capture_output=True,
@@ -125,17 +112,17 @@ async def analyze_file_changes(
             cwd=cwd
         )
         
-        analysis = {
+        git_result = {
             "base_branch": base_branch,
-            "files_changed": files_result.stdout,
+            "files_changed": diff_files.stdout,
             "statistics": stat_result.stdout,
             "commits": commits_result.stdout,
-            "diff": diff_content if include_diff else "Diff not included (set include_diff=true to see full diff)",
+            "diff": diff_content if include_diff else "include_diff is set to false",
             "truncated": truncated,
             "total_diff_lines": len(diff_lines) if include_diff else 0
         }
         
-        return json.dumps(analysis, indent=2)
+        return json.dumps(git_result, indent=2)
         
     except subprocess.CalledProcessError as e:
         return json.dumps({"error": f"Git error: {e.stderr}"})
@@ -145,14 +132,14 @@ async def analyze_file_changes(
 
 @mcp.tool()
 async def get_pr_templates() -> str:
-    """List available PR templates with their content."""
+    """List all available PR templates and their contents."""
     templates = [
         {
-            "filename": filename,
+            "filename": file,
             "type": template_type,
-            "content": (TEMPLATES_DIR / filename).read_text()
+            "content": (TEMPLATES_DIR / file).read_text()
         }
-        for filename, template_type in DEFAULT_TEMPLATES.items()
+        for file, template_type in DEFAULT_TEMPLATES.items()
     ]
     
     return json.dumps(templates, indent=2)
@@ -160,11 +147,11 @@ async def get_pr_templates() -> str:
 
 @mcp.tool()
 async def suggest_template(changes_summary: str, change_type: str) -> str:
-    """Let Claude analyze the changes and suggest the most appropriate PR template.
+    """Let LLM analyze the changes and suggest the most appropriate PR template.
     
     Args:
         changes_summary: Your analysis of what the changes do
-        change_type: The type of change you've identified (bug, feature, docs, refactor, test, etc.)
+        change_type: Type of change you've identified (bug, feature, docs, refactor, test, security, performance)
     """
     
     # Get available templates
@@ -490,8 +477,25 @@ Structure your response as:
 
 if __name__ == "__main__":
     # Run MCP server normally
-    print("Starting PR Agent Slack MCP server...")
-    print("Make sure to set SLACK_WEBHOOK_URL environment variable")
-    print("To receive GitHub webhooks, run the webhook server separately:")
-    print("  python webhook_server.py")
-    mcp.run()
+    # print("Starting PR Agent Slack MCP server...")
+    # print("Make sure to set SLACK_WEBHOOK_URL environment variable")
+    # print("To receive GitHub webhooks, run the webhook server separately:")
+    # print("  python webhook_server.py")
+    # mcp.run()
+
+    DEFAULT_TEMPLATES = {
+        file : file.split(".")[0].capitalize().replace("_", " ")
+        for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
+    }
+    for name, template in DEFAULT_TEMPLATES.items():
+        print(template)
+
+    # template_list = [
+    #     {
+    #         "filename": file,
+    #         "type": template_type,
+    #         "content": (TEMPLATES_DIR / file).read_text()
+    #     }
+    #     for file, template_type in DEFAULT_TEMPLATES.items()
+    # ]
+    # print(template_list)
