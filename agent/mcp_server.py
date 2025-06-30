@@ -18,7 +18,7 @@ EVENTS_FILE = Path(__file__).parent / "events_git.json"
 
 # Dynamic Loading of default PR templates.
 DEFAULT_TEMPLATES = {
-    file: file.split(".")[0].capitalize().replace("_", " ")
+    file.split(".")[0].capitalize().replace("_", " ") : file
     for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
 }
 
@@ -139,7 +139,7 @@ async def get_pr_templates() -> str:
             "type": template_type,
             "content": (TEMPLATES_DIR / file).read_text()
         }
-        for file, template_type in DEFAULT_TEMPLATES.items()
+        for template_type, file in DEFAULT_TEMPLATES.items()
     ]
     
     return json.dumps(templates, indent=2)
@@ -158,18 +158,22 @@ async def suggest_template(changes_summary: str, change_type: str) -> str:
     templates_response = await get_pr_templates()
     templates = json.loads(templates_response)
     
-    # Find matching template
-    template_file = TYPE_MAPPING.get(change_type.lower(), "feature.md")
+    # Find matching template using generator function
+    matching_template = next(
+        iter(templates for templates, aliases in TYPE_MAPPING.items() if change_type.lower() in aliases),
+        "Feature"
+    )
+    template_file = DEFAULT_TEMPLATES.get(matching_template, "feature.md")
     selected_template = next(
         (t for t in templates if t["filename"] == template_file),
-        templates[0]  # Default to first template if no match
+        templates[0]  # Defaults to first template (i.e. Bug Fix)
     )
     
     suggestion = {
         "recommended_template": selected_template,
         "reasoning": f"Based on your analysis: '{changes_summary}', this appears to be a {change_type} change.",
-        "template_content": selected_template["content"],
-        "usage_hint": "Claude can help you fill out this template based on the specific changes in your PR."
+        "template": selected_template["content"],
+        "usage_hint": "LLM can fill out this template based on the specific changes in your pull request."
     }
     
     return json.dumps(suggestion, indent=2)
@@ -484,17 +488,32 @@ if __name__ == "__main__":
     # mcp.run()
 
     DEFAULT_TEMPLATES = {
-        file : file.split(".")[0].capitalize().replace("_", " ")
+        file.split(".")[0].capitalize().replace("_", " ") : file
         for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
     }
     for name, template in DEFAULT_TEMPLATES.items():
-        print(template)
+        print(name, template)
+
+    TYPE_MAPPING = {
+        "Bug fix": ["bug", "fix"],
+        "Feature": ["feature", "enhancement"],
+        "Documentation": ["docs", "documentation"],
+        "Refactor": ["refactor", "cleanup"],
+        "Test": ["test", "testing"],
+        "Performance": ["performance", "optimization"],
+        "Security": ["security"]
+    }
+    change_type = "docs"
+    matched_key = next(iter(templates for templates, aliases in TYPE_MAPPING.items() if change_type.lower() in aliases), None)
+    print(matched_key)
+    # print(f"Matched file is: {DEFAULT_TEMPLATES[matched_key]}")
+    print(f"Matched file is: {DEFAULT_TEMPLATES.get(matched_key, "gello.md")}")
 
     # template_list = [
     #     {
     #         "filename": file,
     #         "type": template_type,
-    #         "content": (TEMPLATES_DIR / file).read_text()
+    #         # "content": (TEMPLATES_DIR / file).read_text()
     #     }
     #     for file, template_type in DEFAULT_TEMPLATES.items()
     # ]
