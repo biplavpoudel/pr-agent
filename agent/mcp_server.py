@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-
+import asyncio
 import json
 import os
 import subprocess
+from datetime import datetime
+
 import requests
 from typing import Optional
 from pathlib import Path
@@ -14,7 +16,7 @@ import logging
 mcp = FastMCP("pr_agent")
 
 TEMPLATES_DIR = Path(__file__).parent.parent/ "templates"
-EVENTS_FILE = Path(__file__).parent / "events_git.json"
+EVENTS_FILE = Path(__file__).parent.parent / "events_git.json"
 
 # Dynamic Loading of default PR templates.
 DEFAULT_TEMPLATES = {
@@ -192,7 +194,7 @@ async def get_recent_actions_events(limit: int = 10) -> str:
     
     with open(EVENTS_FILE, 'r') as f:
         events = json.load(f)
-    
+
     # Return most recent events
     recent = events[-limit:]
     return json.dumps(recent, indent=2)
@@ -205,7 +207,7 @@ async def get_workflow_status(workflow_name: Optional[str] = None) -> str:
     Args:
         workflow_name: Optional specific workflow name to filter by
     """
-    # Read events from file
+
     if not EVENTS_FILE.exists():
         return json.dumps({"message": "No GitHub Actions events received yet"})
     
@@ -213,28 +215,31 @@ async def get_workflow_status(workflow_name: Optional[str] = None) -> str:
         events = json.load(f)
     
     if not events:
-        return json.dumps({"message": "No GitHub Actions events received yet"})
+        return json.dumps({"message": "GitHub Actions events empty!"})
     
-    # Filter for workflow events
+    # Filtering out workflow events
     workflow_events = [
-        e for e in events 
+        e for e in events
         if e.get("workflow_run") is not None
     ]
-    
+
+    # if specific name given, filter it out
     if workflow_name:
         workflow_events = [
             e for e in workflow_events
             if e["workflow_run"].get("name") == workflow_name
         ]
-    
+
     # Group by workflow and get latest status
     workflows = {}
     for event in workflow_events:
         run = event["workflow_run"]
-        name = run["name"]
-        if name not in workflows or run["updated_at"] > workflows[name]["updated_at"]:
-            workflows[name] = {
-                "name": name,
+        run_name = run["name"]
+        # comparing dates between event with same names to get the last updated one
+        if (run_name not in workflows or
+                datetime.fromisoformat(run["updated_at"]) > datetime.fromisoformat(workflows[run_name]["updated_at"])):
+            workflows[run_name] = {
+                "name": run_name,
                 "status": run["status"],
                 "conclusion": run.get("conclusion"),
                 "run_number": run["run_number"],
@@ -244,8 +249,6 @@ async def get_workflow_status(workflow_name: Optional[str] = None) -> str:
     
     return json.dumps(list(workflows.values()), indent=2)
 
-
-# ===== New Module 3: Slack Integration Tools =====
 
 @mcp.tool()
 async def send_slack_notification(message: str) -> str:
@@ -287,9 +290,6 @@ async def send_slack_notification(message: str) -> str:
         return "❌ Connection error. Check your internet connection and webhook URL."
     except Exception as e:
         return f"❌ Error sending message: {str(e)}"
-
-
-# ===== New Module 3: Slack Formatting Prompts =====
 
 @mcp.prompt()
 async def format_ci_failure_alert():
@@ -348,9 +348,6 @@ Slack formatting rules:
 - > text for quotes
 - Use simple bullet format with - or *
 - :emoji_name: for emojis"""
-
-
-# ===== Prompts from Module 2 (Complete) =====
 
 @mcp.prompt()
 async def analyze_ci_results():
@@ -487,34 +484,27 @@ if __name__ == "__main__":
     # print("  python webhook_server.py")
     # mcp.run()
 
-    DEFAULT_TEMPLATES = {
-        file.split(".")[0].capitalize().replace("_", " ") : file
-        for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
-    }
-    for name, template in DEFAULT_TEMPLATES.items():
-        print(name, template)
-
-    TYPE_MAPPING = {
-        "Bug fix": ["bug", "fix"],
-        "Feature": ["feature", "enhancement"],
-        "Documentation": ["docs", "documentation"],
-        "Refactor": ["refactor", "cleanup"],
-        "Test": ["test", "testing"],
-        "Performance": ["performance", "optimization"],
-        "Security": ["security"]
-    }
-    change_type = "docs"
-    matched_key = next(iter(templates for templates, aliases in TYPE_MAPPING.items() if change_type.lower() in aliases), None)
-    print(matched_key)
+    # DEFAULT_TEMPLATES = {
+    #     file.split(".")[0].capitalize().replace("_", " ") : file
+    #     for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
+    # }
+    # for name, template in DEFAULT_TEMPLATES.items():
+    #     print(name, template)
+    #
+    # TYPE_MAPPING = {
+    #     "Bug fix": ["bug", "fix"],
+    #     "Feature": ["feature", "enhancement"],
+    #     "Documentation": ["docs", "documentation"],
+    #     "Refactor": ["refactor", "cleanup"],
+    #     "Test": ["test", "testing"],
+    #     "Performance": ["performance", "optimization"],
+    #     "Security": ["security"]
+    # }
+    # change_type = "docs"
+    # matched_key = next(iter(templates for templates, aliases in TYPE_MAPPING.items() if change_type.lower() in aliases), None)
+    # print(matched_key)
     # print(f"Matched file is: {DEFAULT_TEMPLATES[matched_key]}")
-    print(f"Matched file is: {DEFAULT_TEMPLATES.get(matched_key, "gello.md")}")
+    # print(f"Matched file is: {DEFAULT_TEMPLATES.get(matched_key, "gello.md")}")
 
-    # template_list = [
-    #     {
-    #         "filename": file,
-    #         "type": template_type,
-    #         # "content": (TEMPLATES_DIR / file).read_text()
-    #     }
-    #     for file, template_type in DEFAULT_TEMPLATES.items()
-    # ]
-    # print(template_list)
+    result  = asyncio.run(get_workflow_status())
+    print(result)

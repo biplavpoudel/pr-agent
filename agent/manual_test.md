@@ -234,7 +234,7 @@ After running these tests, verify:
 curl http://localhost:8080/health
 
 # Check stored events
-cat example_git_events.json
+cat events_git.json
 ```
 
 ### MCP Server Issues

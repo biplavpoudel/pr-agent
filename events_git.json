@@ -8,6 +8,7 @@
       "status": "completed",
       "conclusion": "failure",
       "run_number": 42,
+      "updated_at": "2025-05-30T22:42:00.904997",
       "html_url": "https://github.com/test/repo/actions/runs/123",
       "head_branch": "test",
       "head_sha": "abc123"
