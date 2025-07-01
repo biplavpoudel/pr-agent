@@ -1,0 +1,113 @@
+{
+	"blocks": [
+		{
+			"type": "header",
+			"text": {
+				"type": "plain_text",
+				"text": "Github Actions Success for [Repository Name]:white_check_mark:",
+				"emoji": true
+			}
+		},
+		{
+			"type": "context",
+			"elements": [
+				{
+					"type": "mrkdwn",
+					"text": "The continuous integration has successfully ran!"
+				}
+			]
+		},
+		{
+			"type": "section",
+			"accessory": {
+				"type": "image",
+				"image_url": "https://media4.giphy.com/media/v1.Y2lkPTc5MGI3NjExbXk5eXFnOTNyNWNoMzlpaXdnMW9lM3E2djZsY3Jyb2c3bzRnZWxrayZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/xT9DPiHFM8Iy3hiC3e/giphy.gif",
+				"alt_text": "computer die spongebob"
+			},
+			"text": {
+				"type": "mrkdwn",
+				"text": "♡⸜(˶˃ ᵕ ˂˶)⸝♡ \n\n\n\nHere is the quick overview of the workflow with the changes made:"
+			}
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "rich_text",
+			"elements": [
+				{
+					"type": "rich_text_section",
+					"elements": [
+						{
+							"type": "emoji",
+							"name": "arrows_counterclockwise",
+							"unicode": "1f504"
+						},
+						{
+							"type": "text",
+							"text": " Changes:",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": "\n"
+						}
+					]
+				},
+				{
+					"type": "rich_text_list",
+					"style": "bullet",
+					"indent": 0,
+					"border": 0,
+					"elements": [
+						{
+							"type": "rich_text_section",
+							"elements": [
+								{
+									"type": "text",
+									"text": "Key feature or fix 1"
+								}
+							]
+						},
+						{
+							"type": "rich_text_section",
+							"elements": [
+								{
+									"type": "text",
+									"text": "Key feature or fix 2"
+								}
+							]
+						}
+					]
+				},
+				{
+					"type": "rich_text_section",
+					"elements": [
+						{
+							"type": "text",
+							"text": "\n"
+						},
+						{
+							"type": "text",
+							"text": "Links",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": ": "
+						},
+						{
+							"type": "link",
+							"url": "https://github.com/user/repo",
+							"text": "View Changes"
+						}
+					]
+				}
+			]
+		}
+	]
+}

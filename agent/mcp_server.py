@@ -4,18 +4,25 @@ import json
 import os
 import subprocess
 from datetime import datetime
+import textwrap
 
 import requests
 from typing import Optional
+from typing import Dict, Any
 from pathlib import Path
 
+
+from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 import logging
 
 # Initializing the FastMCP server
 mcp = FastMCP("pr_agent")
 
+load_dotenv(verbose=True)
+
 TEMPLATES_DIR = Path(__file__).parent.parent/ "templates"
+PROMPTS_DIR = Path(__file__).parent.parent/ "prompts"
 EVENTS_FILE = Path(__file__).parent.parent / "events_git.json"
 
 # Dynamic Loading of default PR templates.
@@ -251,229 +258,136 @@ async def get_workflow_status(workflow_name: Optional[str] = None) -> str:
 
 
 @mcp.tool()
-async def send_slack_notification(message: str) -> str:
-    """Send a formatted notification to the team Slack channel.
+async def send_slack_notification(payload: Dict[str, Any]) -> str:
+    """Send a formatted notification to the team Slack channel using webhook.
     
     Args:
-        message: The message to send to Slack (supports Slack markdown)
+        payload: The markdown payload to be posted in the Slack channel.
         
-    IMPORTANT: For CI failures, use format_ci_failure_alert prompt first!
-    IMPORTANT: For deployments, use format_ci_success_summary prompt first!
+    NOTE: For CI failures, we use format_ci_failure_alert prompt first!
+    NOTE: For CI success, we use format_ci_success_summary prompt first!
     """
     webhook_url = os.getenv("SLACK_WEBHOOK_URL")
     if not webhook_url:
-        return "Error: SLACK_WEBHOOK_URL environment variable not set"
+        return "Error: SLACK_WEBHOOK_URL env variable not set!"
     
     try:
-        # Prepare the payload with proper Slack formatting
-        payload = {
-            "text": message,
-            "mrkdwn": True
-        }
-        
-        # Send POST request to Slack webhook
+        # Sending POST request to Slack webhook
         response = requests.post(
             webhook_url,
-            json=payload,
-            timeout=10
+            json = payload,
+            timeout = 10
         )
         
-        # Check if request was successful
+        # Check if successful request
         if response.status_code == 200:
-            return "✅ Message sent successfully to Slack"
+            return "✅ Slack Message sent successfully"
         else:
             return f"❌ Failed to send message. Status: {response.status_code}, Response: {response.text}"
         
     except requests.exceptions.Timeout:
-        return "❌ Request timed out. Check your internet connection and try again."
+        return "⏰ Request timed out. Check your internet connection and try again."
     except requests.exceptions.ConnectionError:
-        return "❌ Connection error. Check your internet connection and webhook URL."
+        return "🔌 Connection error. Check your internet connection and webhook URL."
     except Exception as e:
         return f"❌ Error sending message: {str(e)}"
 
-@mcp.prompt()
-async def format_ci_failure_alert():
-    """Create a Slack alert for CI/CD failures with rich formatting."""
-    return """Format this GitHub Actions failure as a Slack message using ONLY Slack markdown syntax:
+@mcp.prompt(description="creates a slack payload for GitHub Actions failure alert using the json template.")
+async def ci_failure_alert_template() -> str:
+    """Create a Slack alert for CI/CD failures using the template."""
 
-:rotating_light: *CI Failure Alert* :rotating_light:
+    with open(PROMPTS_DIR/"ci_failure.json", 'r') as f:
+        failure_json = json.load(f)
 
-A CI workflow has failed:
-*Workflow*: workflow_name
-*Branch*: branch_name
-*Status*: Failed
-*View Details*: <https://github.com/test/repo/actions/runs/123|View Logs>
+    prompt_header =  textwrap.dedent(f"""Use this Slack Payload as template for failing GitHub Actions runs...""")
 
-Please check the logs and address any issues.
+    return f"{prompt_header}\n{failure_json}"
 
-CRITICAL: Use EXACT Slack link format: <https://full-url|Link Text>
-Examples:
-- CORRECT: <https://github.com/user/repo|Repository>
-- WRONG: [Repository](https://github.com/user/repo)
-- WRONG: https://github.com/user/repo
+@mcp.prompt(description="creates a slack payload for successful GitHub Actions run using the json template.")
+async def ci_success_summary_template() -> str:
+    """Create a Slack message for successful deployments using the template."""
 
-Slack formatting rules:
-- *text* for bold (NOT **text**)
-- `text` for code
-- > text for quotes
-- Use simple bullet format without special characters
-- :emoji_name: for emojis"""
+    with open(PROMPTS_DIR/"ci_success.json", 'r') as f:
+        success_json = json.load(f)
+
+    prompt_header = """Use this Slack Payload as template for successful GitHub Actions runs..."""
+    return f"{prompt_header}\n{success_json}"
 
 
-@mcp.prompt()
-async def format_ci_success_summary():
-    """Create a Slack message celebrating successful deployments."""
-    return """Format this successful GitHub Actions run as a Slack message using ONLY Slack markdown syntax:
-
-:white_check_mark: *Deployment Successful* :white_check_mark:
-
-Deployment completed successfully for [Repository Name]
-
-*Changes:*
-- Key feature or fix 1
-- Key feature or fix 2
-
-*Links:*
-<https://github.com/user/repo|View Changes>
-
-CRITICAL: Use EXACT Slack link format: <https://full-url|Link Text>
-Examples:
-- CORRECT: <https://github.com/user/repo|Repository>
-- WRONG: [Repository](https://github.com/user/repo)
-- WRONG: https://github.com/user/repo
-
-Slack formatting rules:
-- *text* for bold (NOT **text**)
-- `text` for code
-- > text for quotes
-- Use simple bullet format with - or *
-- :emoji_name: for emojis"""
-
-@mcp.prompt()
+@mcp.prompt(description="analyzes the latest CI/CD result from the GitHub Actions.")
 async def analyze_ci_results():
     """Analyze recent CI/CD results and provide insights."""
-    return """Please analyze the recent CI/CD results from GitHub Actions:
 
-1. First, call get_recent_actions_events() to fetch the latest CI/CD events
-2. Then call get_workflow_status() to check current workflow states
-3. Identify any failures or issues that need attention
-4. Provide actionable next steps based on the results
+    with open(PROMPTS_DIR/"analyze_result.md", 'r') as f:
+        analysis_template = f.read()
 
-Format your response as:
-## CI/CD Status Summary
-- *Overall Health*: [Good/Warning/Critical]
-- *Failed Workflows*: [List any failures with links]
-- *Successful Workflows*: [List recent successes]
-- *Recommendations*: [Specific actions to take]
-- *Trends*: [Any patterns you notice]"""
+    prompt_header = textwrap.dedent("""Please analyze the recent CI/CD results from GitHub Actions:
+    
+    1. First, call get_recent_actions_events() to fetch the latest CI/CD events
+    2. Then call get_workflow_status() to check current workflow states
+    3. Identify any failures or issues that need attention
+    4. Provide actionable next steps based on the results
+    
+    Format your response as:""")
+
+    return f"{prompt_header}\n\n{analysis_template}"
 
 
-@mcp.prompt()
+@mcp.prompt(description="generates deployment summary for the team communication.")
 async def create_deployment_summary():
     """Generate a deployment summary for team communication."""
-    return """Create a deployment summary for team communication:
 
-1. Check workflow status with get_workflow_status()
-2. Look specifically for deployment-related workflows
-3. Note the deployment outcome, timing, and any issues
+    with open(PROMPTS_DIR/"generate_summary.md", 'r') as f:
+        generate_template = f.read()
 
-Format as a concise message suitable for Slack:
+    prompt_header = textwrap.dedent("""Create a deployment summary for team communication:
 
-🚀 *Deployment Update*
-- *Status*: [✅ Success / ❌ Failed / ⏳ In Progress]
-- *Environment*: [Production/Staging/Dev]
-- *Version/Commit*: [If available from workflow data]
-- *Duration*: [If available]
-- *Key Changes*: [Brief summary if available]
-- *Issues*: [Any problems encountered]
-- *Next Steps*: [Required actions if failed]
+    1. Check workflow status with get_workflow_status()
+    2. Look specifically for deployment-related workflows
+    3. Note the deployment outcome, timing, and any issues
+    
+    Keep it brief but informative for team awareness.
+    
+    Format as a concise message suitable for Slack:""")
 
-Keep it brief but informative for team awareness."""
+    return f"{prompt_header}\n{generate_template}"
 
 
-@mcp.prompt()
+@mcp.prompt(description="generates a detailed PR status report.")
 async def generate_pr_status_report():
     """Generate a comprehensive PR status report including CI/CD results."""
-    return """Generate a comprehensive PR status report:
 
-1. Use analyze_file_changes() to understand what changed
-2. Use get_workflow_status() to check CI/CD status
-3. Use suggest_template() to recommend the appropriate PR template
-4. Combine all information into a cohesive report
+    with open(PROMPTS_DIR/"generate_report.md", 'r') as f:
+        report_template = f.read()
 
-Create a detailed report with:
+    prompt_header = textwrap.dedent("""Generate a comprehensive PR status report:
 
-## 📋 PR Status Report
+    1. Use analyze_file_changes() to understand what changed
+    2. Use get_workflow_status() to check CI/CD status
+    3. Use suggest_template() to recommend the appropriate PR template
+    4. Combine all information into a cohesive report
+    
+    Create a detailed report with: """)
 
-### 📝 Code Changes
-- *Files Modified*: [Count by type - .py, .js, etc.]
-- *Change Type*: [Feature/Bug/Refactor/etc.]
-- *Impact Assessment*: [High/Medium/Low with reasoning]
-- *Key Changes*: [Bullet points of main modifications]
-
-### 🔄 CI/CD Status
-- *All Checks*: [✅ Passing / ❌ Failing / ⏳ Running]
-- *Test Results*: [Pass rate, failed tests if any]
-- *Build Status*: [Success/Failed with details]
-- *Code Quality*: [Linting, coverage if available]
-
-### 📌 Recommendations
-- *PR Template*: [Suggested template and why]
-- *Next Steps*: [What needs to happen before merge]
-- *Reviewers*: [Suggested reviewers based on files changed]
-
-### ⚠️ Risks & Considerations
-- [Any deployment risks]
-- [Breaking changes]
-- [Dependencies affected]"""
+    return f"{prompt_header}\n{report_template}"
 
 
-@mcp.prompt()
+@mcp.prompt(description="troubleshoots the failing GitHub Actions workflows.")
 async def troubleshoot_workflow_failure():
     """Help troubleshoot a failing GitHub Actions workflow."""
-    return """Help troubleshoot failing GitHub Actions workflows:
+    with open(PROMPTS_DIR / "troubleshoot.md", 'r') as f:
+        troubleshoot_template = f.read()
 
-1. Use get_recent_actions_events() to find recent failures
-2. Use get_workflow_status() to see which workflows are failing
-3. Analyze the failure patterns and timing
-4. Provide systematic troubleshooting steps
+    prompt_header = textwrap.dedent("""Help troubleshoot failing GitHub Actions workflows:
 
-Structure your response as:
+    1. Use get_recent_actions_events() to find recent failures
+    2. Use get_workflow_status() to see which workflows are failing
+    3. Analyze the failure patterns and timing
+    4. Provide systematic troubleshooting steps
+    
+    Structure your response as:""")
 
-## 🔧 Workflow Troubleshooting Guide
-
-### ❌ Failed Workflow Details
-- *Workflow Name*: [Name of failing workflow]
-- *Failure Type*: [Test/Build/Deploy/Lint]
-- *First Failed*: [When did it start failing]
-- *Failure Rate*: [Intermittent or consistent]
-
-### 🔍 Diagnostic Information
-- *Error Patterns*: [Common error messages or symptoms]
-- *Recent Changes*: [What changed before failures started]
-- *Dependencies*: [External services or resources involved]
-
-### 💡 Possible Causes (ordered by likelihood)
-1. *[Most Likely]*: [Description and why]
-2. *[Likely]*: [Description and why]
-3. *[Possible]*: [Description and why]
-
-### ✅ Suggested Fixes
-**Immediate Actions:**
-- [ ] [Quick fix to try first]
-- [ ] [Second quick fix]
-
-**Investigation Steps:**
-- [ ] [How to gather more info]
-- [ ] [Logs or data to check]
-
-**Long-term Solutions:**
-- [ ] [Preventive measure]
-- [ ] [Process improvement]
-
-### 📚 Resources
-- [Relevant documentation links]
-- [Similar issues or solutions]"""
+    return f"{prompt_header}\n{troubleshoot_template}"
 
 
 if __name__ == "__main__":
@@ -506,5 +420,5 @@ if __name__ == "__main__":
     # print(f"Matched file is: {DEFAULT_TEMPLATES[matched_key]}")
     # print(f"Matched file is: {DEFAULT_TEMPLATES.get(matched_key, "gello.md")}")
 
-    result  = asyncio.run(get_workflow_status())
+    result  = asyncio.run(ci_failure_alert_template())
     print(result)

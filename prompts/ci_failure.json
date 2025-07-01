@@ -1,0 +1,141 @@
+{
+	"blocks": [
+		{
+			"type": "header",
+			"text": {
+				"type": "plain_text",
+				"text": "Github Actions Failure Alert :rotating_light:",
+				"emoji": true
+			}
+		},
+		{
+			"type": "context",
+			"elements": [
+				{
+					"type": "mrkdwn",
+					"text": "The continuous integration has failed unexpectedly!"
+				}
+			]
+		},
+		{
+			"type": "section",
+			"text": {
+				"type": "mrkdwn",
+				"text": "(>`ω<)💢 \n\n\nHere is the quick overview of the failed workflow:"
+			},
+			"accessory": {
+				"type": "image",
+				"image_url": "https://media2.giphy.com/media/v1.Y2lkPTc5MGI3NjExMTMwOW5iZG8xazc3M3VmdzR2b24yeGY1cXo2ZzNyeHpmYWh2Zjl5aSZlcD12MV9pbnRlcm5hbF9naWZfYnlfaWQmY3Q9Zw/XIS4ARkxVah4A/giphy.gif",
+				"alt_text": "computer die spongebob"
+			}
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "rich_text",
+			"elements": [
+				{
+					"type": "rich_text_section",
+					"elements": [
+						{
+							"type": "text",
+							"text": "\n"
+						},
+						{
+							"type": "text",
+							"text": "Workflow",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": ": "
+						},
+						{
+							"type": "text",
+							"text": "workflow_name",
+							"style": {
+								"code": true
+							}
+						},
+						{
+							"type": "text",
+							"text": "\n"
+						},
+						{
+							"type": "text",
+							"text": "Branch",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": ": "
+						},
+						{
+							"type": "text",
+							"text": "branch_name",
+							"style": {
+								"code": true
+							}
+						},
+						{
+							"type": "text",
+							"text": "\n"
+						},
+						{
+							"type": "text",
+							"text": "Status",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": ": Failed\n"
+						},
+						{
+							"type": "text",
+							"text": "Details",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": ": "
+						},
+						{
+							"type": "link",
+							"url": "https://github.com/test/repo/actions/runs/123",
+							"text": "View Logs"
+						}
+					]
+				}
+			]
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "rich_text",
+			"elements": [
+				{
+					"type": "rich_text_section",
+					"elements": [
+						{
+							"type": "text",
+							"text": "Please check the logs and address any issues.",
+							"style": {
+								"italic": true
+							}
+						}
+					]
+				}
+			]
+		}
+	]
+}
