@@ -5,6 +5,7 @@ import os
 import subprocess
 from datetime import datetime
 import textwrap
+import aiofiles
 
 import requests
 from typing import Optional
@@ -296,8 +297,8 @@ async def send_slack_notification(payload: Dict[str, Any]) -> str:
 async def ci_failure_alert_template() -> str:
     """Create a Slack alert for CI/CD failures using the template."""
 
-    with open(PROMPTS_DIR/"ci_failure.json", 'r') as f:
-        failure_json = json.load(f)
+    async with aiofiles.open(PROMPTS_DIR/"ci_failure.json", 'r') as f:
+        failure_json = await json.load(f)
 
     prompt_header =  textwrap.dedent(f"""Use this Slack Payload as template for failing GitHub Actions runs...""")
 
@@ -307,8 +308,8 @@ async def ci_failure_alert_template() -> str:
 async def ci_success_summary_template() -> str:
     """Create a Slack message for successful deployments using the template."""
 
-    with open(PROMPTS_DIR/"ci_success.json", 'r') as f:
-        success_json = json.load(f)
+    async with aiofiles.open(PROMPTS_DIR/"ci_success.json", 'r') as f:
+        success_json = await json.load(f)
 
     prompt_header = """Use this Slack Payload as template for successful GitHub Actions runs..."""
     return f"{prompt_header}\n{success_json}"
@@ -318,8 +319,8 @@ async def ci_success_summary_template() -> str:
 async def analyze_ci_results():
     """Analyze recent CI/CD results and provide insights."""
 
-    with open(PROMPTS_DIR/"analyze_result.md", 'r') as f:
-        analysis_template = f.read()
+    async with aiofiles.open(PROMPTS_DIR/"analyze_result.md", 'r') as f:
+        analysis_template = await f.read()
 
     prompt_header = textwrap.dedent("""
     Please analyze the recent CI/CD results from GitHub Actions:
@@ -338,8 +339,8 @@ async def analyze_ci_results():
 async def create_deployment_summary():
     """Generate a deployment summary for team communication."""
 
-    with open(PROMPTS_DIR/"generate_summary.md", 'r') as f:
-        generate_template = f.read()
+    async with aiofiles.open(PROMPTS_DIR/"generate_summary.md", 'r') as f:
+        generate_template = await f.read()
 
     prompt_header = textwrap.dedent("""
     Create a deployment summary for team communication:
@@ -359,8 +360,8 @@ async def create_deployment_summary():
 async def generate_pr_status_report():
     """Generate a comprehensive PR status report including CI/CD results."""
 
-    with open(PROMPTS_DIR/"generate_report.md", 'r') as f:
-        report_template = f.read()
+    async with aiofiles.open(PROMPTS_DIR/"generate_report.md", 'r') as f:
+        report_template = await f.read()
 
     prompt_header = textwrap.dedent("""
     Generate a comprehensive PR status report:
@@ -378,8 +379,8 @@ async def generate_pr_status_report():
 @mcp.prompt(description="troubleshoots the failing GitHub Actions workflows.")
 async def troubleshoot_workflow_failure():
     """Help troubleshoot a failing GitHub Actions workflow."""
-    with open(PROMPTS_DIR / "troubleshoot.md", 'r') as f:
-        troubleshoot_template = f.read()
+    async with aiofiles.open(PROMPTS_DIR / "troubleshoot.md", 'r') as f:
+        troubleshoot_template = await f.read()
 
     prompt_header = textwrap.dedent("""
     Help troubleshoot failing GitHub Actions workflows:
@@ -395,11 +396,8 @@ async def troubleshoot_workflow_failure():
 
 
 if __name__ == "__main__":
-    # Run MCP server normally
+    # Run MCP server and run webhook server separately
     print("Starting PR Agent Slack MCP server...")
-    print("Make sure to set SLACK_WEBHOOK_URL environment variable")
-    print("To receive GitHub webhooks, run the webhook server separately:")
-    print("  python webhook_server.py")
     mcp.run()
 
     # DEFAULT_TEMPLATES = {
