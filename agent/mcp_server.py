@@ -321,7 +321,8 @@ async def analyze_ci_results():
     with open(PROMPTS_DIR/"analyze_result.md", 'r') as f:
         analysis_template = f.read()
 
-    prompt_header = textwrap.dedent("""Please analyze the recent CI/CD results from GitHub Actions:
+    prompt_header = textwrap.dedent("""
+    Please analyze the recent CI/CD results from GitHub Actions:
     
     1. First, call get_recent_actions_events() to fetch the latest CI/CD events
     2. Then call get_workflow_status() to check current workflow states
@@ -340,7 +341,8 @@ async def create_deployment_summary():
     with open(PROMPTS_DIR/"generate_summary.md", 'r') as f:
         generate_template = f.read()
 
-    prompt_header = textwrap.dedent("""Create a deployment summary for team communication:
+    prompt_header = textwrap.dedent("""
+    Create a deployment summary for team communication:
 
     1. Check workflow status with get_workflow_status()
     2. Look specifically for deployment-related workflows
@@ -360,7 +362,8 @@ async def generate_pr_status_report():
     with open(PROMPTS_DIR/"generate_report.md", 'r') as f:
         report_template = f.read()
 
-    prompt_header = textwrap.dedent("""Generate a comprehensive PR status report:
+    prompt_header = textwrap.dedent("""
+    Generate a comprehensive PR status report:
 
     1. Use analyze_file_changes() to understand what changed
     2. Use get_workflow_status() to check CI/CD status
@@ -378,7 +381,8 @@ async def troubleshoot_workflow_failure():
     with open(PROMPTS_DIR / "troubleshoot.md", 'r') as f:
         troubleshoot_template = f.read()
 
-    prompt_header = textwrap.dedent("""Help troubleshoot failing GitHub Actions workflows:
+    prompt_header = textwrap.dedent("""
+    Help troubleshoot failing GitHub Actions workflows:
 
     1. Use get_recent_actions_events() to find recent failures
     2. Use get_workflow_status() to see which workflows are failing
@@ -392,11 +396,11 @@ async def troubleshoot_workflow_failure():
 
 if __name__ == "__main__":
     # Run MCP server normally
-    # print("Starting PR Agent Slack MCP server...")
-    # print("Make sure to set SLACK_WEBHOOK_URL environment variable")
-    # print("To receive GitHub webhooks, run the webhook server separately:")
-    # print("  python webhook_server.py")
-    # mcp.run()
+    print("Starting PR Agent Slack MCP server...")
+    print("Make sure to set SLACK_WEBHOOK_URL environment variable")
+    print("To receive GitHub webhooks, run the webhook server separately:")
+    print("  python webhook_server.py")
+    mcp.run()
 
     # DEFAULT_TEMPLATES = {
     #     file.split(".")[0].capitalize().replace("_", " ") : file
@@ -420,5 +424,5 @@ if __name__ == "__main__":
     # print(f"Matched file is: {DEFAULT_TEMPLATES[matched_key]}")
     # print(f"Matched file is: {DEFAULT_TEMPLATES.get(matched_key, "gello.md")}")
 
-    result  = asyncio.run(ci_failure_alert_template())
-    print(result)
+    # result  = asyncio.run(ci_failure_alert_template())
+    # print(result)
