@@ -1,15 +1,13 @@
 install:
 	uv pip install --upgrade pip && \
-		uv pip install -r requirements.txt
+		uv pip install -r requirements.txt && \
+		uv add -r requirements.txt
 
 lint:
 	pylint --disable=R,C,W *.py
 
 format:
-	pyink *.py
-
-docformatter:
-	docformatter --in-place *.py
+	pyink ./agent/*.py *.py
 
 all:
 	install lint format
