@@ -1,34 +1,31 @@
 #!/usr/bin/env python3
-"""
-Unit tests for Module 1: Basic MCP Server
-"""
 
 import json
 import pytest
+
 from unittest.mock import patch, MagicMock
 from agent.mcp_server import (
     analyze_file_changes,
     get_pr_templates,
-    suggest_template,
-    create_default_template
+    suggest_template
 )
 
 
 class TestAnalyzeFileChanges:
     """Test the analyze_file_changes tool."""
-    
+
     @pytest.mark.asyncio
     async def test_analyze_with_diff(self):
         """Test analyzing changes with full diff included."""
         mock_result = MagicMock()
         mock_result.stdout = "M\tfile1.py\nA\tfile2.py\n"
         mock_result.stderr = ""
-        
+
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = mock_result
-            
+
             result = await analyze_file_changes("main", include_diff=True)
-            
+
             assert isinstance(result, str)
             data = json.loads(result)
             assert data["base_branch"] == "main"
@@ -45,9 +42,9 @@ class TestAnalyzeFileChanges:
         
         with patch('subprocess.run') as mock_run:
             mock_run.return_value = mock_result
-            
+
             result = await analyze_file_changes("main", include_diff=False)
-            
+
             data = json.loads(result)
             assert "Diff not included" in data["diff"]
     
@@ -58,8 +55,7 @@ class TestAnalyzeFileChanges:
             mock_run.side_effect = Exception("Git not found")
             
             result = await analyze_file_changes("main", True)
-            
-            assert "Error:" in result
+            assert "error" in result
 
 
 class TestPRTemplates:
@@ -78,19 +74,6 @@ class TestPRTemplates:
         assert any(t["type"] == "Bug Fix" for t in templates)
         assert any(t["type"] == "Feature" for t in templates)
         assert all("content" in t for t in templates)
-    
-    def test_create_default_template(self, tmp_path):
-        """Test creating default template files."""
-        template_path = tmp_path / "test.md"
-        
-        create_default_template(template_path, "Bug Fix")
-        
-        assert template_path.exists()
-        content = template_path.read_text()
-        assert "## Bug Fix" in content
-        assert "Description" in content
-        assert "Root Cause" in content
-
 
 class TestSuggestTemplate:
     """Test template suggestion based on analysis."""

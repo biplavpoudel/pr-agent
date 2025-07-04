@@ -16,6 +16,7 @@ from pathlib import Path
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 import logging
+logging.basicConfig(level=logging.ERROR, force=True)
 
 # Initializing the FastMCP server
 mcp = FastMCP("pr_agent")
@@ -66,10 +67,8 @@ async def analyze_file_changes(
                 roots_result = await context.session.list_roots()
                 root = roots_result.roots[0]
                 working_directory = root.uri.path
-                logging.info(f"Working directory: {working_directory}")
-            except RuntimeError as e:
-                # If we can't get roots, fall back to current directory
-                logging.error(f"Runtime context error: {str(e)}")
+            except (Exception, ValueError, RuntimeError) as e:
+                logging.error(f"Context unavailable outside of request. Context fallback triggered! {str(e)}")
                 pass
         
         # Using provided working directory else current directory
@@ -127,7 +126,7 @@ async def analyze_file_changes(
             "files_changed": diff_files.stdout,
             "statistics": stat_result.stdout,
             "commits": commits_result.stdout,
-            "diff": diff_content if include_diff else "include_diff is set to false",
+            "diff": diff_content if include_diff else "Diff not included",
             "truncated": truncated,
             "total_diff_lines": len(diff_lines) if include_diff else 0
         }
