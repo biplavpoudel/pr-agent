@@ -4,7 +4,7 @@ import json
 import pytest
 
 from unittest.mock import patch, MagicMock
-from agent.mcp_server import (analyze_file_changes, get_pr_templates, suggest_template)
+from agent.mcp_server import (analyze_file_changes, get_pr_templates, suggest_template, create_default_template)
 
 
 class TestAnalyzeFileChanges:
@@ -60,16 +60,30 @@ class TestPRTemplates:
     @pytest.mark.asyncio
     async def test_get_templates(self, tmp_path, monkeypatch):
         """Test getting available templates."""
-        # Use temporary directory for templates
-        monkeypatch.setattr("server.TEMPLATES_DIR", tmp_path)
+
+        """Test suggesting bug fix template."""
+        monkeypatch.setattr("agent.mcp_server.TEMPLATES_DIR", tmp_path)
 
         result = await get_pr_templates()
 
         templates = json.loads(result)
         assert len(templates) > 0
-        assert any(t["type"] == "Bug Fix" for t in templates)
+        assert any(t["type"] == "Bug fix" for t in templates)
         assert any(t["type"] == "Feature" for t in templates)
         assert all("content" in t for t in templates)
+
+    @pytest.mark.asyncio
+    async def test_create_default_template(self, tmp_path):
+        """Test creating default template files."""
+        template_path = tmp_path / "test.md"
+
+        await create_default_template(template_path)
+
+        assert template_path.exists()
+        content = template_path.read_text()
+        assert "Test Update" in content
+        assert "Description" in content
+        assert "Coverage Impact" in content
 
 
 class TestSuggestTemplate:
@@ -78,7 +92,7 @@ class TestSuggestTemplate:
     @pytest.mark.asyncio
     async def test_suggest_bug_fix(self, tmp_path, monkeypatch):
         """Test suggesting bug fix template."""
-        monkeypatch.setattr("server.TEMPLATES_DIR", tmp_path)
+        # monkeypatch.setattr("TEMPLATES_DIR", tmp_path)
 
         # Create templates first
         await get_pr_templates()
@@ -89,13 +103,13 @@ class TestSuggestTemplate:
 
         suggestion = json.loads(result)
         assert suggestion["recommended_template"]["filename"] == "bug_fix.md"
-        assert "Bug Fix" in suggestion["recommended_template"]["type"]
+        assert "Bug fix" in suggestion["recommended_template"]["type"]
         assert "reasoning" in suggestion
 
     @pytest.mark.asyncio
     async def test_suggest_feature(self, tmp_path, monkeypatch):
         """Test suggesting feature template."""
-        monkeypatch.setattr("server.TEMPLATES_DIR", tmp_path)
+        # monkeypatch.setattr("TEMPLATES_DIR", tmp_path)
 
         await get_pr_templates()
 
@@ -109,7 +123,7 @@ class TestSuggestTemplate:
     @pytest.mark.asyncio
     async def test_suggest_with_type_variations(self, tmp_path, monkeypatch):
         """Test template suggestion with various type names."""
-        monkeypatch.setattr("server.TEMPLATES_DIR", tmp_path)
+        # monkeypatch.setattr("TEMPLATES_DIR", tmp_path)
 
         await get_pr_templates()
 
@@ -133,7 +147,7 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_full_workflow(self, tmp_path, monkeypatch):
         """Test the complete workflow from analysis to suggestion."""
-        monkeypatch.setattr("server.TEMPLATES_DIR", tmp_path)
+        # monkeypatch.setattr("server.TEMPLATES_DIR", tmp_path)
 
         # Mock git commands
         with patch("subprocess.run") as mock_run:
@@ -160,7 +174,7 @@ class TestIntegration:
 
             suggestion = json.loads(suggestion_result)
             assert "recommended_template" in suggestion
-            assert "template_content" in suggestion
+            assert "template" in suggestion
             assert suggestion["recommended_template"]["type"] == "Feature"
 
 

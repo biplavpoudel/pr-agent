@@ -28,13 +28,6 @@ TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 PROMPTS_DIR = Path(__file__).parent.parent / "prompts"
 EVENTS_FILE = Path(__file__).parent.parent / "events_git.json"
 
-# Dynamic Loading of default PR templates.
-DEFAULT_TEMPLATES = {
-    file.split(".")[0].capitalize().replace("_", " "): file
-    for file in os.listdir(TEMPLATES_DIR)
-    if file.endswith(".md")
-}
-
 # Type mapping for PR templates
 TYPE_MAPPING = {
     "Bug fix": ["bug", "fix"],
@@ -151,17 +144,66 @@ async def analyze_file_changes(
 @mcp.tool()
 async def get_pr_templates() -> str:
     """List all available PR templates and their contents."""
+
+    if not any(file.endswith(".md") for file in os.listdir(TEMPLATES_DIR)):
+        await create_default_templates(TEMPLATES_DIR)
+
+    default_templates = {
+        file.split(".")[0].capitalize().replace("_", " "): file
+        for file in os.listdir(TEMPLATES_DIR)
+        if file.endswith(".md")
+    }
     templates = [
         {
             "filename": file,
             "type": template_type,
             "content": (TEMPLATES_DIR / file).read_text(),
         }
-        for template_type, file in DEFAULT_TEMPLATES.items()
+        for template_type, file in default_templates.items()
     ]
 
     return json.dumps(templates, indent=2)
 
+@mcp.tool()
+async def create_default_templates():
+    """Create default PR templates and their contents if empty."""
+    templates = {
+        "bug_fix" : "## 🐞 Bug Fix\n\n### 📄 Description\n\n### 🔍 Root Cause\n\n### 🛠️ Solution\n\n### ✅ Testing Done\n\n### 🔗 Related Issues",
+        "feature" : "## ✨ New Feature\n\n### 📄 Description\n\n### 🚀 Motivation\n\n### 🛠️ Implementation Details\n\n### ✅ Testing Checklist\n\n### 📚 Documentation### ⚠️ Breaking Changes",
+        "documentation" : "## 📝 Documentation Update\n\n### 📄 Description\n\n### ✏️ Changes Made\n\n### ✅ Review Checklist",
+        "refactor" : "## ♻️ Code Refactoring\n\n### 📄 Description\n\n### 🎯 Motivation\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist\n\n### ✅ Testing Checklist",
+        "test" : "## 🧪 Test Update\n\n### 📄 Description\n\n### 📈 Coverage Impact\n\n### 🧷 Test Types Added/Updated\n\n### 🧩 Related Features/Components",
+        "performance" : "## 🚀 Performance Improvement\n\n### 📄 Description\n\n### 📊 Metrics (Before/After)\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist",
+        "security" : "## 🔐 Security Update\n\n### 📄 Description\n\n### 🎯 Impact\n\n### 🛠️ Solution\n\n### ✅ Testing Checklist\n\n### 🔗 References",
+    }
+
+    for template_type in templates.values():
+        file_path = TEMPLATES_DIR / f"{template_type}.md"
+        file_path.write_text(templates[template_type], encoding="utf-8")
+
+@mcp.tool()
+async def create_default_specific_template(template_path):
+    """Create a specified default PR template and its content if empty."""
+    templates = {
+        "bug_fix" : "## 🐞 Bug Fix\n\n### 📄 Description\n\n### 🔍 Root Cause\n\n### 🛠️ Solution\n\n### ✅ Testing Done\n\n### 🔗 Related Issues",
+        "feature" : "## ✨ New Feature\n\n### 📄 Description\n\n### 🚀 Motivation\n\n### 🛠️ Implementation Details\n\n### ✅ Testing Checklist\n\n### 📚 Documentation### ⚠️ Breaking Changes",
+        "documentation" : "## 📝 Documentation Update\n\n### 📄 Description\n\n### ✏️ Changes Made\n\n### ✅ Review Checklist",
+        "refactor" : "## ♻️ Code Refactoring\n\n### 📄 Description\n\n### 🎯 Motivation\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist\n\n### ✅ Testing Checklist",
+        "test" : "## 🧪 Test Update\n\n### 📄 Description\n\n### 📈 Coverage Impact\n\n### 🧷 Test Types Added/Updated\n\n### 🧩 Related Features/Components",
+        "performance" : "## 🚀 Performance Improvement\n\n### 📄 Description\n\n### 📊 Metrics (Before/After)\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist",
+        "security" : "## 🔐 Security Update\n\n### 📄 Description\n\n### 🎯 Impact\n\n### 🛠️ Solution\n\n### ✅ Testing Checklist\n\n### 🔗 References",
+    }
+
+    if not os.path.exists(template_path):
+        default_templates = {
+            file.split(".")[0].capitalize().replace("_", " "): file
+            for file in os.listdir(TEMPLATES_DIR)
+            if file.endswith(".md")
+        }
+
+        file_name = next(filename for filename in default_templates.values() if filename == template_path)
+        content = templates[file_name.split(".")[0]]
+        template_path.write_text(content)
 
 @mcp.tool()
 async def suggest_template(changes_summary: str, change_type: str) -> str:
@@ -420,15 +462,15 @@ async def troubleshoot_workflow_failure():
 
 if __name__ == "__main__":
     # Run MCP server and run webhook server separately
-    print("Starting PR Agent Slack MCP server...")
-    mcp.run()
+    # print("Starting PR Agent Slack MCP server...")
+    # mcp.run()
 
-    # DEFAULT_TEMPLATES = {
-    #     file.split(".")[0].capitalize().replace("_", " ") : file
-    #     for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
-    # }
-    # for name, template in DEFAULT_TEMPLATES.items():
-    #     print(name, template)
+    DEFAULT_TEMPLATES = {
+        file.split(".")[0].capitalize().replace("_", " ") : file
+        for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
+    }
+    for name, template in DEFAULT_TEMPLATES.items():
+        print(name, template)
     #
     # TYPE_MAPPING = {
     #     "Bug fix": ["bug", "fix"],
