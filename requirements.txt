@@ -9,3 +9,4 @@ langchain-ollama~=0.3.3
 pytest~=8.4.1
 aiofiles~=24.1.0
 mcp~=1.9.4
+langchain~=0.3.26

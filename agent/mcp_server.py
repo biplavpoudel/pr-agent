@@ -456,15 +456,15 @@ async def troubleshoot_workflow_failure():
 
 if __name__ == "__main__":
     # Run MCP server and run webhook server separately
-    # print("Starting PR Agent Slack MCP server...")
-    # mcp.run()
+    print("Starting PR Agent Slack MCP server...")
+    mcp.run(transport='sse')
 
-    DEFAULT_TEMPLATES = {
-        file.split(".")[0].capitalize().replace("_", " ") : file
-        for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
-    }
-    for name, template in DEFAULT_TEMPLATES.items():
-        print(name, template)
+    # DEFAULT_TEMPLATES = {
+    #     file.split(".")[0].capitalize().replace("_", " ") : file
+    #     for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
+    # }
+    # for name, template in DEFAULT_TEMPLATES.items():
+    #     print(name, template)
     #
     # TYPE_MAPPING = {
     #     "Bug fix": ["bug", "fix"],
