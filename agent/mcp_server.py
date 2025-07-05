@@ -39,6 +39,16 @@ TYPE_MAPPING = {
     "Security": ["security"],
 }
 
+DEFAULT_TEMPLATES = {
+    "bug_fix": "## 🐞 Bug Fix\n\n### 📄 Description\n\n### 🔍 Root Cause\n\n### 🛠️ Solution\n\n### ✅ Testing Done\n\n### 🔗 Related Issues",
+    "feature": "## ✨ New Feature\n\n### 📄 Description\n\n### 🚀 Motivation\n\n### 🛠️ Implementation Details\n\n### ✅ Testing Checklist\n\n### 📚 Documentation### ⚠️ Breaking Changes",
+    "documentation": "## 📝 Documentation Update\n\n### 📄 Description\n\n### ✏️ Changes Made\n\n### ✅ Review Checklist",
+    "refactor": "## ♻️ Code Refactoring\n\n### 📄 Description\n\n### 🎯 Motivation\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist\n\n### ✅ Testing Checklist",
+    "test": "## 🧪 Test Update\n\n### 📄 Description\n\n### 📈 Coverage Impact\n\n### 🧷 Test Types Added/Updated\n\n### 🧩 Related Features/Components",
+    "performance": "## 🚀 Performance Improvement\n\n### 📄 Description\n\n### 📊 Metrics (Before/After)\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist",
+    "security": "## 🔐 Security Update\n\n### 📄 Description\n\n### 🎯 Impact\n\n### 🛠️ Solution\n\n### ✅ Testing Checklist\n\n### 🔗 References",
+}
+
 
 @mcp.tool()
 async def analyze_file_changes(
@@ -146,9 +156,9 @@ async def get_pr_templates() -> str:
     """List all available PR templates and their contents."""
 
     if not any(file.endswith(".md") for file in os.listdir(TEMPLATES_DIR)):
-        await create_default_templates(TEMPLATES_DIR)
+        await create_default_templates()
 
-    default_templates = {
+    template_types = {
         file.split(".")[0].capitalize().replace("_", " "): file
         for file in os.listdir(TEMPLATES_DIR)
         if file.endswith(".md")
@@ -159,50 +169,27 @@ async def get_pr_templates() -> str:
             "type": template_type,
             "content": (TEMPLATES_DIR / file).read_text(),
         }
-        for template_type, file in default_templates.items()
+        for template_type, file in template_types.items()
     ]
 
     return json.dumps(templates, indent=2)
 
 @mcp.tool()
-async def create_default_templates():
+async def create_default_templates() -> None:
     """Create default PR templates and their contents if empty."""
-    templates = {
-        "bug_fix" : "## 🐞 Bug Fix\n\n### 📄 Description\n\n### 🔍 Root Cause\n\n### 🛠️ Solution\n\n### ✅ Testing Done\n\n### 🔗 Related Issues",
-        "feature" : "## ✨ New Feature\n\n### 📄 Description\n\n### 🚀 Motivation\n\n### 🛠️ Implementation Details\n\n### ✅ Testing Checklist\n\n### 📚 Documentation### ⚠️ Breaking Changes",
-        "documentation" : "## 📝 Documentation Update\n\n### 📄 Description\n\n### ✏️ Changes Made\n\n### ✅ Review Checklist",
-        "refactor" : "## ♻️ Code Refactoring\n\n### 📄 Description\n\n### 🎯 Motivation\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist\n\n### ✅ Testing Checklist",
-        "test" : "## 🧪 Test Update\n\n### 📄 Description\n\n### 📈 Coverage Impact\n\n### 🧷 Test Types Added/Updated\n\n### 🧩 Related Features/Components",
-        "performance" : "## 🚀 Performance Improvement\n\n### 📄 Description\n\n### 📊 Metrics (Before/After)\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist",
-        "security" : "## 🔐 Security Update\n\n### 📄 Description\n\n### 🎯 Impact\n\n### 🛠️ Solution\n\n### ✅ Testing Checklist\n\n### 🔗 References",
-    }
 
-    for template_type in templates.values():
+    for template_type in DEFAULT_TEMPLATES.keys():
         file_path = TEMPLATES_DIR / f"{template_type}.md"
-        file_path.write_text(templates[template_type], encoding="utf-8")
+        file_path.write_text(DEFAULT_TEMPLATES[template_type], encoding="utf-8")
 
 @mcp.tool()
 async def create_default_specific_template(template_path):
-    """Create a specified default PR template and its content if empty."""
-    templates = {
-        "bug_fix" : "## 🐞 Bug Fix\n\n### 📄 Description\n\n### 🔍 Root Cause\n\n### 🛠️ Solution\n\n### ✅ Testing Done\n\n### 🔗 Related Issues",
-        "feature" : "## ✨ New Feature\n\n### 📄 Description\n\n### 🚀 Motivation\n\n### 🛠️ Implementation Details\n\n### ✅ Testing Checklist\n\n### 📚 Documentation### ⚠️ Breaking Changes",
-        "documentation" : "## 📝 Documentation Update\n\n### 📄 Description\n\n### ✏️ Changes Made\n\n### ✅ Review Checklist",
-        "refactor" : "## ♻️ Code Refactoring\n\n### 📄 Description\n\n### 🎯 Motivation\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist\n\n### ✅ Testing Checklist",
-        "test" : "## 🧪 Test Update\n\n### 📄 Description\n\n### 📈 Coverage Impact\n\n### 🧷 Test Types Added/Updated\n\n### 🧩 Related Features/Components",
-        "performance" : "## 🚀 Performance Improvement\n\n### 📄 Description\n\n### 📊 Metrics (Before/After)\n\n### 🔧 Changes Made\n\n### ✅ Testing Checklist",
-        "security" : "## 🔐 Security Update\n\n### 📄 Description\n\n### 🎯 Impact\n\n### 🛠️ Solution\n\n### ✅ Testing Checklist\n\n### 🔗 References",
-    }
+    """Create a specified default PR template and its content if empty.
+    """
 
     if not os.path.exists(template_path):
-        default_templates = {
-            file.split(".")[0].capitalize().replace("_", " "): file
-            for file in os.listdir(TEMPLATES_DIR)
-            if file.endswith(".md")
-        }
-
-        file_name = next(filename for filename in default_templates.values() if filename == template_path)
-        content = templates[file_name.split(".")[0]]
+        file_name = str(template_path).split("/")[-1].replace(".md", "")
+        content = DEFAULT_TEMPLATES[file_name]
         template_path.write_text(content)
 
 @mcp.tool()
@@ -227,7 +214,14 @@ async def suggest_template(changes_summary: str, change_type: str) -> str:
         ),
         "Feature",
     )
-    template_file = DEFAULT_TEMPLATES.get(matching_template, "feature.md")
+    # Mapper between types and filename
+    template_types = {
+        file.split(".")[0].capitalize().replace("_", " "): file
+        for file in os.listdir(TEMPLATES_DIR)
+        if file.endswith(".md")
+    }
+
+    template_file = template_types.get(matching_template)
     selected_template = next(
         (t for t in templates if t["filename"] == template_file),
         templates[0],  # Defaults to first template (i.e. Bug Fix)

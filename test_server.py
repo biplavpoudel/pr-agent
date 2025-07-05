@@ -4,7 +4,7 @@ import json
 import pytest
 
 from unittest.mock import patch, MagicMock
-from agent.mcp_server import (analyze_file_changes, get_pr_templates, suggest_template, create_default_template)
+from agent.mcp_server import (analyze_file_changes, get_pr_templates, suggest_template, create_default_specific_template)
 
 
 class TestAnalyzeFileChanges:
@@ -73,11 +73,12 @@ class TestPRTemplates:
         assert all("content" in t for t in templates)
 
     @pytest.mark.asyncio
-    async def test_create_default_template(self, tmp_path):
+    async def test_create_default_template(self, tmp_path, monkeypatch):
         """Test creating default template files."""
+        monkeypatch.setattr("agent.mcp_server.TEMPLATES_DIR", tmp_path)
         template_path = tmp_path / "test.md"
 
-        await create_default_template(template_path)
+        await create_default_specific_template(template_path)
 
         assert template_path.exists()
         content = template_path.read_text()
@@ -92,7 +93,7 @@ class TestSuggestTemplate:
     @pytest.mark.asyncio
     async def test_suggest_bug_fix(self, tmp_path, monkeypatch):
         """Test suggesting bug fix template."""
-        # monkeypatch.setattr("TEMPLATES_DIR", tmp_path)
+        monkeypatch.setattr("agent.mcp_server.TEMPLATES_DIR", tmp_path)
 
         # Create templates first
         await get_pr_templates()
@@ -109,7 +110,7 @@ class TestSuggestTemplate:
     @pytest.mark.asyncio
     async def test_suggest_feature(self, tmp_path, monkeypatch):
         """Test suggesting feature template."""
-        # monkeypatch.setattr("TEMPLATES_DIR", tmp_path)
+        monkeypatch.setattr("agent.mcp_server.TEMPLATES_DIR", tmp_path)
 
         await get_pr_templates()
 
@@ -123,7 +124,7 @@ class TestSuggestTemplate:
     @pytest.mark.asyncio
     async def test_suggest_with_type_variations(self, tmp_path, monkeypatch):
         """Test template suggestion with various type names."""
-        # monkeypatch.setattr("TEMPLATES_DIR", tmp_path)
+        monkeypatch.setattr("agent.mcp_server.TEMPLATES_DIR", tmp_path)
 
         await get_pr_templates()
 
@@ -147,7 +148,7 @@ class TestIntegration:
     @pytest.mark.asyncio
     async def test_full_workflow(self, tmp_path, monkeypatch):
         """Test the complete workflow from analysis to suggestion."""
-        # monkeypatch.setattr("server.TEMPLATES_DIR", tmp_path)
+        monkeypatch.setattr("agent.mcp_server.TEMPLATES_DIR", tmp_path)
 
         # Mock git commands
         with patch("subprocess.run") as mock_run:
