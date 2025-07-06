@@ -21,3 +21,28 @@ The primary goal of this repository is to reimplement the system using the **Lan
    - Useful for tracking updates in collaborative workflows.
 
 ---
+### 🚂 Initialize Cloudflared Tunnel
+1. Download and install [cloudflared](http://github.com/cloudflare/cloudflared/releases/latest/) package.
+2. Login to Cloudflare: `cloudflared tunnel login`
+3. Create a tunnel. e.g. `webhook-tunnel`
+4. A credential json file is created at `~/.cloudlfared/[tunnel-id].json`
+5. Create a config.yml file in `~/.cloudflared` with custom subdomain. For example:
+```
+tunnel: [tunnel_id]
+credentials-file: /home/biplav/.cloudflared/[tunnel_id].json
+
+ingress:
+  - hostname: webhook.example.com
+    service: http://localhost:8080
+  - service: http_status:404
+```
+
+
+---
+### 🧑‍💻 Using the agent
+1. Head to agent directory:
+   `cd agent`
+2. Start the MCP server:
+   ` python mcp_server.py`
+3. In next terminal, expose webhook_server using Cloudflare Tunnel:
+   `cloudflared tunnel run webhook-tunnel`

@@ -10,3 +10,6 @@ pytest~=8.4.1
 aiofiles~=24.1.0
 mcp~=1.9.4
 langchain~=0.3.26
+aiohttp~=3.12.13
+fastapi~=0.115.14
+uvicorn~=0.34.3
