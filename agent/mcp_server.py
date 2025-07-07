@@ -20,7 +20,7 @@ import logging
 logging.basicConfig(level=logging.ERROR, force=True)
 
 # Initializing the FastMCP server
-mcp = FastMCP("pr_agent")
+mcp = FastMCP(name = "PR_Agent")
 
 load_dotenv(verbose=True)
 
@@ -457,29 +457,4 @@ async def troubleshoot_workflow_failure():
 if __name__ == "__main__":
     # Run MCP server and run webhook server separately
     print("Starting PR Agent Slack MCP server...")
-    mcp.run(transport='sse')
-
-    # DEFAULT_TEMPLATES = {
-    #     file.split(".")[0].capitalize().replace("_", " ") : file
-    #     for file in os.listdir(TEMPLATES_DIR) if file.endswith(".md")
-    # }
-    # for name, template in DEFAULT_TEMPLATES.items():
-    #     print(name, template)
-    #
-    # TYPE_MAPPING = {
-    #     "Bug fix": ["bug", "fix"],
-    #     "Feature": ["feature", "enhancement"],
-    #     "Documentation": ["docs", "documentation"],
-    #     "Refactor": ["refactor", "cleanup"],
-    #     "Test": ["test", "testing"],
-    #     "Performance": ["performance", "optimization"],
-    #     "Security": ["security"]
-    # }
-    # change_type = "docs"
-    # matched_key = next(iter(templates for templates, aliases in TYPE_MAPPING.items() if change_type.lower() in aliases), None)
-    # print(matched_key)
-    # print(f"Matched file is: {DEFAULT_TEMPLATES[matched_key]}")
-    # print(f"Matched file is: {DEFAULT_TEMPLATES.get(matched_key, "gello.md")}")
-
-    # result  = asyncio.run(ci_failure_alert_template())
-    # print(result)
+    mcp.run(transport="stdio")

@@ -4,7 +4,7 @@ install:
 		uv add -r requirements.txt
 
 lint:
-	pylint --disable=R,C,W *.py
+	pylint --disable=R,C,W *.py ./agent/*.py
 
 format:
 	pyink ./agent/*.py *.py
