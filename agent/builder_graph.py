@@ -4,6 +4,9 @@ from typing import TypedDict
 import httpx
 import asyncio
 
+import logging
+from typing_extensions import TypedDict, Annotated
+
 from langchain.agents.chat.prompt import HUMAN_MESSAGE
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
@@ -11,17 +14,14 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.prebuilt import ToolNode, tools_condition
 from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
-
-import logging
-logging.basicConfig(level=logging.INFO, force=True)
-
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph.message import add_messages
-from typing_extensions import TypedDict, Annotated
+
 
 from dotenv import load_dotenv
-
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO, force=True)
 
 async def build_client(llm_provider:str = "ollama"):
     """
@@ -64,8 +64,8 @@ async def build_client(llm_provider:str = "ollama"):
     builder = StateGraph(State)
 
     tools = await client.get_tools()
-    # for tool in tools:
-    #     logging.info(f"{tool}\n")
+    for tool in tools:
+        logging.info(f"{tool}\n")
 
     # Creating LangGraph Nodes
 
@@ -91,10 +91,10 @@ async def build_client(llm_provider:str = "ollama"):
 
 async def main():
     builder_graph = await build_client(llm_provider="ollama")
-    question = "what are the tool names from the mcp servers?"
-    message = [HumanMessage(content=question)]
-    graph_response = await builder_graph.ainvoke({"messages": message})
-    print(graph_response["messages"][-1].content)
+    # question = "what are the tool names from the mcp servers?"
+    # message = [HumanMessage(content=question)]
+    # graph_response = await builder_graph.ainvoke({"messages": message})
+    # print(graph_response["messages"][-1].content)
 
 if __name__ == "__main__":
     asyncio.run(main())

@@ -29,7 +29,7 @@ async def is_valid_signature(raw_payload: bytes, signature: str=Header(None)) ->
     mac = hmac.new(bytes(os.getenv("WEBHOOK_SECRET"), encoding="utf-8"), msg=raw_payload, digestmod=hashlib.sha256)
     expected_signature = "sha256=" + mac.hexdigest()
     return hmac.compare_digest(expected_signature, signature)
-@app.post("/webhook/github/")
+@app.post("/webhook/github/pr/")
 async def handle_webhook(request:Request) -> Response:
     """Handles incoming GitHub webhook."""
     raw_payload = await request.body()
@@ -66,5 +66,5 @@ async def handle_webhook(request:Request) -> Response:
 if __name__ == "__main__":
     print("🚀 Starting webhook server on http://localhost:8080")
     print("📝 Events will be saved to:", EVENTS_FILE)
-    print("🔗 Webhook URL: http://localhost:8080/webhook/github")
+    print("🔗 Webhook URL: http://localhost:8080/webhook/github/pr")
     uvicorn.run(app, host="localhost", port=8080)
