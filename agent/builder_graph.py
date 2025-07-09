@@ -5,6 +5,10 @@ import httpx
 import asyncio
 
 import logging
+
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langgraph.graph.state import CompiledStateGraph
+from pydantic import BaseModel, Field
 from typing_extensions import TypedDict, Annotated
 
 from langchain.agents.chat.prompt import HUMAN_MESSAGE
@@ -22,8 +26,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, force=True)
+logger = logging.getLogger(__name__)
 
-async def build_client(llm_provider:str = "ollama"):
+with open("./prompts/system_prompt.txt", "r", encoding="utf-8") as f:
+    ASSISTANT_SYSTEM_PROMPT_BASE = f.read()
+
+async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
     """
     Building LangGraph client that uses MCP Servers
     :param llm_provider: ollama (for development); gemini, gpt-4o, grok, etc. (for production)
@@ -41,6 +49,7 @@ async def build_client(llm_provider:str = "ollama"):
                 max_retries=3,
                 timeout=60)
         else:
+
             raise ValueError(f"Unknown LLM provider: {llm_provider}")
     except httpx.ConnectError as e:
         print(f"Ollama not running in background!. {str(e)}")
@@ -52,49 +61,73 @@ async def build_client(llm_provider:str = "ollama"):
         {
             "mcp": {
                 "command": "python",
-                "args": ["mcp_server.py"],
+                "args": ["./agent/mcp_server.py"],
                 "transport": "stdio",
             }
         }
     )
 
-    class State(TypedDict):
-        messages: Annotated[list[BaseMessage], add_messages]
-
-    builder = StateGraph(State)
-
-    tools = await client.get_tools()
-    for tool in tools:
+    assistant_tools = await client.get_tools()
+    for tool in assistant_tools:
         logging.info(f"{tool}\n")
 
-    # Creating LangGraph Nodes
+    class GraphProcessingState(BaseModel):
+        messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
+        prompts: str = Field(default_factory=str, description="Prompts to be used by the agent")
+        # tools_enabled: dict = Field(default_factory=dict, description="Tools enabled for the agent")
 
-    async def assistant(state: State):
-        llm_response = await llm.bind_tools(tools).ainvoke(state["messages"])
-        return {"messages": llm_response}
+        # Creating LangGraph Nodes
 
-    builder.add_node(assistant)
-    builder.add_node(ToolNode(tools))
+    async def assistant_node(state: GraphProcessingState, config=None):
+        assistant_model = llm.bind_tools(assistant_tools)
+        if state.prompt:
+            final_prompt = "\n".join([state.prompt, ASSISTANT_SYSTEM_PROMPT_BASE])
+        else:
+            final_prompt = ASSISTANT_SYSTEM_PROMPT_BASE
+        # creating a chat prompt template with system messages along with user messages using placeholder
+        prompt = ChatPromptTemplate.from_messages(
+            [
+                ("system", final_prompt), MessagesPlaceholder(variable_name="messages")
+            ]
+        )
+        # Runnable sequence to pipe the output of prompt( i.e. list of messages) as input to the assistant_model
+        sequence = prompt | assistant_model
+        response = await sequence.ainvoke({"messages": state.messages}, config=config)
+        return {"messages": response.messages}
 
-    # Adding LangGraph Edges
+    def tools_condition_edge(state: GraphProcessingState):
+        # similar to tools_condition from langgraph.prebuilt.tool_node, but added logger for debugging
+        # routes to ToolNode if tools called in the last message, else ENDS
+        last_message = state.messages[-1]
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+            logger.info(f"Tools call detected: {last_message.tool_calls}")
+            return "tools"
+        return END
 
+    # async def graph_workflow() -> CompiledStateGraph:
+    # Initializing graph with state
+    builder = StateGraph(GraphProcessingState)
+    # Adding nodes to the graph
+    builder.add_node("assistant", assistant_node)
+    builder.add_node("tools", ToolNode(assistant_tools))
+    # Adding LangGraph edges
     builder.add_edge(START, "assistant")
     builder.add_conditional_edges(
-        "assistant",
-        tools_condition,
+        "assistant_node",
+        tools_condition_edge,
     )
     builder.add_edge("tools", "assistant")
     builder.add_edge("assistant", END)
-
     # Compiling the graph
     return builder.compile()
 
 async def main():
-    builder_graph = await build_client(llm_provider="ollama")
-    # question = "what are the tool names from the mcp servers?"
-    # message = [HumanMessage(content=question)]
-    # graph_response = await builder_graph.ainvoke({"messages": message})
-    # print(graph_response["messages"][-1].content)
+    builder_graph = await build_workflow(llm_provider="ollama")
+    question = "what are the tool names from the mcp servers?"
+    message = [HumanMessage(content=question)]
+    graph_response = await builder_graph.ainvoke({"messages": message})
+    print(graph_response["messages"][-1].content)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
