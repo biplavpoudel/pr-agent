@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from typing import TypedDict
 
 import httpx
 import asyncio
@@ -9,13 +8,12 @@ import logging
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
 from langgraph.graph.state import CompiledStateGraph
 from pydantic import BaseModel, Field
-from typing_extensions import TypedDict, Annotated
+from typing_extensions import Annotated
 
-from langchain.agents.chat.prompt import HUMAN_MESSAGE
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_openai import ChatOpenAI
 from langgraph.graph import StateGraph, START, END
-from langgraph.prebuilt import ToolNode, tools_condition
+from langgraph.prebuilt import ToolNode
 from langchain_ollama import ChatOllama
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage, HumanMessage
@@ -31,6 +29,12 @@ logger = logging.getLogger(__name__)
 with open("./prompts/system_prompt.txt", "r", encoding="utf-8") as f:
     ASSISTANT_SYSTEM_PROMPT_BASE = f.read()
 
+class GraphProcessingState(BaseModel):
+    messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
+    prompts: str = Field(default_factory=str, description="Prompts to be used by the agent")
+    # tools_enabled: dict = Field(default_factory=dict, description="Tools enabled for the agent")
+
+
 async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
     """
     Building LangGraph client that uses MCP Servers
@@ -40,7 +44,7 @@ async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
     # Selecting LLM providers
     try:
         if llm_provider == "ollama":
-            llm = ChatOllama(model="qwen3:8b")
+            llm = ChatOllama(model="qwen3:8b", temperature=0.2)
         elif llm_provider == "gemini":
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
         elif llm_provider == "openai":
@@ -71,13 +75,7 @@ async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
     for tool in assistant_tools:
         logging.info(f"{tool}\n")
 
-    class GraphProcessingState(BaseModel):
-        messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
-        prompts: str = Field(default_factory=str, description="Prompts to be used by the agent")
-        # tools_enabled: dict = Field(default_factory=dict, description="Tools enabled for the agent")
-
-        # Creating LangGraph Nodes
-
+    # Creating LangGraph Nodes
     async def assistant_node(state: GraphProcessingState, config=None):
         assistant_model = llm.bind_tools(assistant_tools)
         if state.prompts:
@@ -124,8 +122,12 @@ async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
 async def main():
     builder_graph = await build_workflow(llm_provider="ollama")
     question = "what are the tool names from the mcp servers?"
-    message = [HumanMessage(content=question)]
-    graph_response = await builder_graph.ainvoke({"messages":message})
+    # Create an initial state instance that conforms to GraphProcessingState
+    initial_state = GraphProcessingState(
+        messages=[HumanMessage(content=question)],
+        prompts=""
+    )
+    graph_response = await builder_graph.ainvoke(initial_state)
     print(graph_response["messages"][-1].content)
 
 
