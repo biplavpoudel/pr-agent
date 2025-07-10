@@ -80,20 +80,20 @@ async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
 
     async def assistant_node(state: GraphProcessingState, config=None):
         assistant_model = llm.bind_tools(assistant_tools)
-        if state.prompt:
+        if state.prompts:
             final_prompt = "\n".join([state.prompt, ASSISTANT_SYSTEM_PROMPT_BASE])
         else:
             final_prompt = ASSISTANT_SYSTEM_PROMPT_BASE
         # creating a chat prompt template with system messages along with user messages using placeholder
-        prompt = ChatPromptTemplate.from_messages(
+        prompts = ChatPromptTemplate.from_messages(
             [
                 ("system", final_prompt), MessagesPlaceholder(variable_name="messages")
             ]
         )
         # Runnable sequence to pipe the output of prompt( i.e. list of messages) as input to the assistant_model
-        sequence = prompt | assistant_model
+        sequence = prompts | assistant_model
         response = await sequence.ainvoke({"messages": state.messages}, config=config)
-        return {"messages": response.messages}
+        return {"messages": response}
 
     def tools_condition_edge(state: GraphProcessingState):
         # similar to tools_condition from langgraph.prebuilt.tool_node, but added logger for debugging
@@ -113,7 +113,7 @@ async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
     # Adding LangGraph edges
     builder.add_edge(START, "assistant")
     builder.add_conditional_edges(
-        "assistant_node",
+        "assistant",
         tools_condition_edge,
     )
     builder.add_edge("tools", "assistant")
@@ -125,7 +125,7 @@ async def main():
     builder_graph = await build_workflow(llm_provider="ollama")
     question = "what are the tool names from the mcp servers?"
     message = [HumanMessage(content=question)]
-    graph_response = await builder_graph.ainvoke({"messages": message})
+    graph_response = await builder_graph.ainvoke({"messages":message})
     print(graph_response["messages"][-1].content)
 
 
