@@ -19,8 +19,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.messages import BaseMessage, HumanMessage
 from langgraph.graph.message import add_messages
 
-
 from dotenv import load_dotenv
+
 load_dotenv()
 
 logging.basicConfig(level=logging.INFO, force=True)
@@ -28,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 with open("./prompts/system_prompt.txt", "r", encoding="utf-8") as f:
     ASSISTANT_SYSTEM_PROMPT_BASE = f.read()
+
 
 class GraphProcessingState(BaseModel):
     messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
@@ -49,9 +50,9 @@ async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
             llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
         elif llm_provider == "openai":
             llm = ChatOpenAI(model="gpt-4o",
-                temperature=0,
-                max_retries=3,
-                timeout=60)
+                             temperature=0,
+                             max_retries=3,
+                             timeout=60)
         else:
 
             raise ValueError(f"Unknown LLM provider: {llm_provider}")
@@ -118,6 +119,7 @@ async def build_workflow(llm_provider="ollama") -> CompiledStateGraph:
     builder.add_edge("assistant", END)
     # Compiling the graph
     return builder.compile()
+
 
 async def main():
     builder_graph = await build_workflow(llm_provider="ollama")

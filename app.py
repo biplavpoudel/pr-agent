@@ -3,13 +3,13 @@
 import os
 import logging
 import logging.config
-from typing import Any
+from typing import Any, AsyncGenerator, Tuple, Union
 from uuid import uuid4, UUID
 import json
 
 import gradio as gr
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import HumanMessage, BaseMessage
 from langgraph.types import RunnableConfig
 from pydantic import BaseModel
 
@@ -31,35 +31,42 @@ with open('logger-config.json', 'r') as config_file:
 logging.config.dictConfig(log_config)
 logger = logging.getLogger(__name__)
 
-async def chat_fn(user_input: str, history: dict, input_graph_state: dict, uuid: UUID, prompt: str):
+
+async def chat_fn(user_input: str, history: dict, input_graph_state: BaseModel, uuid: UUID, prompt: str) -> AsyncGenerator[Tuple[str, Union[dict|Any], Union[bool|Any]], None]:
     """
     Args:
-        user_input (str): The user's input message
-        history (dict): The history of the conversation in gradio
-        input_graph_state (dict): The current state of the graph. This includes tool call history
-        uuid (UUID): The unique identifier for the current conversation. This can be used in conjunction with langgraph or for memory
-        prompt (str): The system prompt
-    Returns:
-        str: The output message
-        dict|Any: The final state of the graph
-        bool|Any: Whether to trigger follow-up questions
+        user_input (str): The user's input message.
+        history (dict): The conversation history in Gradio (not used directly in the graph).
+        input_graph_state (dict): The current state of the graph, including tool call history.
+        uuid (UUID): A unique identifier for the current conversation, useful for LangGraph or memory tracking.
+        prompt (str): The system prompt to guide responses.
 
-        We do not use gradio history in the graph since we want the ToolMessage in the history
-        ordered properly. GraphProcessingState.messages is used as history instead
+    Returns:
+        Tuple[str, dict|Any, bool|Any]
+
+            - str: The output message.
+            - dict | Any: The final state of the graph.
+            - bool | Any: A flag indicating whether to trigger follow-up questions.
+
+    Note:
+        Gradio history is not used in the graph directly, as ordered `ToolMessage` objects are preferred.
+        Instead, `GraphProcessingState['messages']` is used to represent history.
     """
+
     try:
         logger.info(f"Prompt: {prompt}")
         if prompt:
-            input_graph_state["prompt"] = prompt
+            input_graph_state["prompts"] = prompt
         if "messages" not in input_graph_state:
             input_graph_state["messages"] = []
         input_graph_state["messages"].append(
             HumanMessage(user_input[:USER_INPUT_MAX_LENGTH])
         )
         input_graph_state["messages"] = input_graph_state["messages"][-TRIM_MESSAGE_LENGTH:]
+
         config = RunnableConfig(
             recursion_limit=20,
-            run_name="user_chat",
+            run_name="pr-agent-chat",
             configurable={"thread_id": uuid}
         )
 
@@ -70,52 +77,45 @@ async def chat_fn(user_input: str, history: dict, input_graph_state: dict, uuid:
         graph = await build_workflow()
 
         async for stream_mode, chunk in graph.astream(
-                    input_graph_state,
-                    config=config,
-                    stream_mode=["values", "messages"],
-                ):
+                input_graph_state,
+                config=config,
+                stream_mode=["values", "messages"],
+        ):
             if stream_mode == "values":
                 final_state = chunk
                 last_message = chunk["messages"][-1]
                 if hasattr(last_message, "tool_calls"):
                     for msg_tool_call in last_message.tool_calls:
                         tool_name: str = msg_tool_call['name']
-                        if tool_name == "tavily_search_results_json":
-                            query = msg_tool_call['args']['query']
-                            waiting_output_seq.append(f"Searching for '{query}'...")
-                            yield "\n".join(waiting_output_seq), gr.skip(), gr.skip()
-                        # download_website_text is the name of the function defined in graph.py
-                        elif tool_name == "download_website_text":
-                            url = msg_tool_call['args']['url']
-                            waiting_output_seq.append(f"Downloading text from '{url}'...")
-                            yield "\n".join(waiting_output_seq), gr.skip(), gr.skip()
-                        else:
-                            waiting_output_seq.append(f"Running {tool_name}...")
-                            yield "\n".join(waiting_output_seq), gr.skip(), gr.skip()
+                        waiting_output_seq.append(f"Running Tool: {tool_name.upper()}...")
+                        yield "\n".join(waiting_output_seq), gr.skip(), gr.skip()
             elif stream_mode == "messages":
                 msg, metadata = chunk
-                # print("output: ", msg, metadata)
-                # assistant_node is the name we defined in the langgraph graph
-                if metadata['langgraph_node'] == "assistant_node" and msg.content:
+                logger.debug("output: ", msg, metadata)
+                # assistant is the name we defined in the langgraph graph for assistant_node
+                if metadata['langgraph_node'] == "assistant" and msg.content:
                     output += msg.content
                     yield output, gr.skip(), gr.skip()
-        # Trigger for asking follow up questions
+        # Trigger for asking follow-up questions
         # + store the graph state for next iteration
         # yield output, dict(final_state), gr.skip()
         yield output + " ", dict(final_state), True
     except Exception:
-        logger.exception("Exception occurred")
+        logger.exception("Exception occurred!")
         user_error_message = "There was an error processing your request. Please try again."
         yield user_error_message, gr.skip(), False
 
+
 def clear():
     return dict(), uuid4()
+
 
 class FollowupQuestions(BaseModel):
     """Model for langchain to use for structured output for followup questions"""
     questions: list[str]
 
-async def populate_followup_questions(end_of_chat_response: bool, messages: dict[str, str], uuid: UUID):
+
+async def populate_followup_questions(end_of_chat_response: bool, messages: list[BaseMessage], uuid: UUID):
     """
     This function gets called a lot due to the asynchronous nature of streaming
 
@@ -127,9 +127,12 @@ async def populate_followup_questions(end_of_chat_response: bool, messages: dict
         run_name="populate_followup_questions",
         configurable={"thread_id": uuid}
     )
-    weak_model_with_config = weak_model.with_config(config)
-    follow_up_questions = await weak_model_with_config.with_structured_output(FollowupQuestions).ainvoke([
-        ("system", f"suggest {FOLLOWUP_QUESTION_NUMBER} followup questions for the user to ask the assistant. Refrain from asking personal questions."),
+    builder_graph = await build_workflow(llm_provider="ollama")
+
+    model_with_config = builder_graph.with_config(config)
+    follow_up_questions = await model_with_config.with_structured_output(FollowupQuestions).ainvoke([
+        ("system",
+         f"suggest {FOLLOWUP_QUESTION_NUMBER} followup questions for the user to ask the assistant. Refrain from asking personal questions."),
         *messages,
     ])
     if len(follow_up_questions.questions) != FOLLOWUP_QUESTION_NUMBER:
@@ -141,7 +144,8 @@ async def populate_followup_questions(end_of_chat_response: bool, messages: dict
         )
     return *buttons, False
 
-async def summarize_chat(end_of_chat_response: bool, messages: dict, sidebar_summaries: dict, uuid: UUID):
+
+async def summarize_chat(end_of_chat_response: bool, messages: list[BaseMessage], sidebar_summaries: dict, uuid: UUID):
     """Summarize chat for tab names"""
     # print("\n------------------------")
     # print("not end_of_chat_response", not end_of_chat_response)
@@ -151,13 +155,13 @@ async def summarize_chat(end_of_chat_response: bool, messages: dict, sidebar_sum
     # print("isinstance(sidebar_summaries, type(lambda x: x))", isinstance(sidebar_summaries, type(lambda x: x)))
     # print("uuid in sidebar_summaries", uuid in sidebar_summaries)
     should_return = (
-        not end_of_chat_response or
-        not messages or
-        messages[-1]["role"] != "assistant" or
-        # This is a bug with gradio
-        isinstance(sidebar_summaries, type(lambda x: x)) or
-        # Already created summary
-        uuid in sidebar_summaries
+            not end_of_chat_response or
+            not messages or
+            messages[-1]["role"] != "assistant" or
+            # This is a bug with gradio
+            isinstance(sidebar_summaries, type(lambda x: x)) or
+            # Already created summary
+            uuid in sidebar_summaries
     )
     if should_return:
         return gr.skip(), gr.skip()
@@ -173,6 +177,7 @@ async def summarize_chat(end_of_chat_response: bool, messages: dict, sidebar_sum
     if uuid not in sidebar_summaries:
         sidebar_summaries[uuid] = summary_response.content
     return sidebar_summaries, False
+
 
 async def new_tab(uuid, gradio_graph, messages, tabs, prompt, sidebar_summaries):
     new_uuid = uuid4()
@@ -190,6 +195,7 @@ async def new_tab(uuid, gradio_graph, messages, tabs, prompt, sidebar_summaries)
     new_messages = {}
     new_prompt = "You are a helpful assistant."
     return new_uuid, new_graph, new_messages, tabs, new_prompt, sidebar_summaries, *suggestion_buttons
+
 
 def switch_tab(selected_uuid, tabs, gradio_graph, uuid, messages, prompt):
     # I don't know of another way to lookup uuid other than
@@ -215,6 +221,7 @@ def switch_tab(selected_uuid, tabs, gradio_graph, uuid, messages, prompt):
         suggestion_buttons.append(gr.Button(visible=False))
     return selected_graph, selected_uuid, selected_messages, tabs, selected_prompt, *suggestion_buttons
 
+
 def delete_tab(current_chat_uuid, selected_uuid, sidebar_summaries, tabs):
     output_messages = gr.skip()
     if current_chat_uuid == selected_uuid:
@@ -225,9 +232,11 @@ def delete_tab(current_chat_uuid, selected_uuid, sidebar_summaries, tabs):
         del sidebar_summaries[selected_uuid]
     return sidebar_summaries, tabs, output_messages
 
+
 def submit_edit_tab(selected_uuid, sidebar_summaries, text):
     sidebar_summaries[selected_uuid] = text
     return sidebar_summaries, ""
+
 
 CSS = """
 footer {visibility: hidden}
@@ -338,7 +347,9 @@ if __name__ == "__main__":
         )
         prompt_textbox.change(lambda prompt: prompt, inputs=[prompt_textbox], outputs=[current_prompt_state])
         with gr.Sidebar() as sidebar:
-            @gr.render(inputs=[tab_edit_uuid_state, end_of_assistant_response_state, sidebar_names_state, current_uuid_state, chatbot, offloaded_tabs_data_storage])
+            @gr.render(
+                inputs=[tab_edit_uuid_state, end_of_assistant_response_state, sidebar_names_state, current_uuid_state,
+                        chatbot, offloaded_tabs_data_storage])
             def render_chats(tab_uuid_edit, end_of_chat_response, sidebar_summaries, active_uuid, messages, tabs):
                 current_tab_button_text = ""
                 if active_uuid not in sidebar_summaries:
@@ -432,12 +443,14 @@ if __name__ == "__main__":
                             )
                     # )
                 # return chat_tabs, sidebar_summaries
+
+
             new_chat_button = gr.Button("New Chat", elem_id="new-chat-button")
         chatbot.clear(fn=clear, outputs=[current_langgraph_state, current_uuid_state])
         with gr.Row():
             followup_question_buttons = []
             for i in range(FOLLOWUP_QUESTION_NUMBER):
-                btn = gr.Button(f"Button {i+1}", visible=False)
+                btn = gr.Button(f"Button {i + 1}", visible=False)
                 followup_question_buttons.append(btn)
 
         multimodal = False
@@ -496,9 +509,12 @@ if __name__ == "__main__":
             ]
         )
 
+
         def click_followup_button(btn):
             buttons = [gr.Button(visible=False) for _ in range(len(followup_question_buttons))]
             return btn, *buttons
+
+
         for btn in followup_question_buttons:
             btn.click(
                 fn=click_followup_button,
@@ -543,9 +559,11 @@ if __name__ == "__main__":
             trigger_mode="always_last"
         )
 
+
         @app.load(inputs=[chatbot_message_storage], outputs=[chat_interface.chatbot_value])
         def load_messages(messages):
             return messages
+
 
         @app.load(inputs=[current_prompt_state], outputs=[prompt_textbox])
         def load_prompt(current_prompt):
