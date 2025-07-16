@@ -1,21 +1,23 @@
 #!/usr/bin/env python3
-
+import asyncio
 import os
 import logging
 import logging.config
+from pathlib import Path
 from typing import Any, AsyncGenerator, Tuple, Union
 from uuid import uuid4, UUID
 import json
 
 import gradio as gr
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, BaseMessage
+from langchain_core.messages import HumanMessage, BaseMessage, AIMessage
+from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RunnableConfig
 from pydantic import BaseModel
 
 load_dotenv()
 
-from agent.builder_graph import build_workflow
+from agent.builder_graph import AssistantAgent, GraphProcessingState
 
 FOLLOWUP_QUESTION_NUMBER = 3
 TRIM_MESSAGE_LENGTH = 16  # Includes tool messages
@@ -24,15 +26,23 @@ USER_INPUT_MAX_LENGTH = 10000  # Characters
 # Using Same secret for data persistence
 BROWSER_STORAGE_SECRET = "itsnosecret"
 
-#Loading config file
-with open('logger-config.json', 'r') as config_file:
+# Loading config file
+LOGGER_PATH = Path('./logger_config.json')
+with open(LOGGER_PATH, 'r') as config_file:
     log_config = json.load(config_file)
 
 logging.config.dictConfig(log_config)
 logger = logging.getLogger(__name__)
 
+async def get_graph_agent() -> Tuple[AssistantAgent, CompiledStateGraph]:
+    agent = AssistantAgent(llm_provider="ollama")
+    graph = await agent.build_workflow()
+    return agent, graph
 
-async def chat_fn(user_input: str, history: dict, input_graph_state: BaseModel, uuid: UUID, prompt: str) -> AsyncGenerator[Tuple[str, Union[dict|Any], Union[bool|Any]], None]:
+agent, graph = asyncio.run(get_graph_agent())
+
+
+async def chat_fn(user_input: str, history: dict, input_graph_state: dict, uuid: UUID, prompt: str) -> AsyncGenerator[Tuple[str, Union[dict|Any], Union[bool|Any]], None]:
     """
     Args:
         user_input (str): The user's input message.
@@ -55,10 +65,12 @@ async def chat_fn(user_input: str, history: dict, input_graph_state: BaseModel, 
 
     try:
         logger.info(f"Prompt: {prompt}")
+
         if prompt:
             input_graph_state["prompts"] = prompt
         if "messages" not in input_graph_state:
             input_graph_state["messages"] = []
+
         input_graph_state["messages"].append(
             HumanMessage(user_input[:USER_INPUT_MAX_LENGTH])
         )
@@ -71,10 +83,8 @@ async def chat_fn(user_input: str, history: dict, input_graph_state: BaseModel, 
         )
 
         output: str = ""
-        final_state: dict | Any = {}
+        final_state: BaseModel | Any = {}
         waiting_output_seq: list[str] = []
-
-        graph = await build_workflow()
 
         async for stream_mode, chunk in graph.astream(
                 input_graph_state,
@@ -91,7 +101,7 @@ async def chat_fn(user_input: str, history: dict, input_graph_state: BaseModel, 
                         yield "\n".join(waiting_output_seq), gr.skip(), gr.skip()
             elif stream_mode == "messages":
                 msg, metadata = chunk
-                logger.debug("output: ", msg, metadata)
+                logger.debug(f"output: {msg} | metadata: {metadata}")
                 # assistant is the name we defined in the langgraph graph for assistant_node
                 if metadata['langgraph_node'] == "assistant" and msg.content:
                     output += msg.content
@@ -121,15 +131,14 @@ async def populate_followup_questions(end_of_chat_response: bool, messages: list
 
     Only populate followup questions if streaming has completed and the message is coming from the assistant
     """
-    if not end_of_chat_response or not messages or messages[-1]["role"] != "assistant":
+    if not end_of_chat_response or not messages or not isinstance(messages[-1], AIMessage):
         return *[gr.skip() for _ in range(FOLLOWUP_QUESTION_NUMBER)], False
     config = RunnableConfig(
         run_name="populate_followup_questions",
         configurable={"thread_id": uuid}
     )
-    builder_graph = await build_workflow(llm_provider="ollama")
 
-    model_with_config = builder_graph.with_config(config)
+    model_with_config = agent.llm.with_config(config)
     follow_up_questions = await model_with_config.with_structured_output(FollowupQuestions).ainvoke([
         ("system",
          f"suggest {FOLLOWUP_QUESTION_NUMBER} followup questions for the user to ask the assistant. Refrain from asking personal questions."),
@@ -169,8 +178,8 @@ async def summarize_chat(end_of_chat_response: bool, messages: list[BaseMessage]
         run_name="summarize_chat",
         configurable={"thread_id": uuid}
     )
-    weak_model_with_config = weak_model.with_config(config)
-    summary_response = await weak_model_with_config.ainvoke([
+    model_with_config = agent.llm.with_config(config)
+    summary_response = await model_with_config.ainvoke([
         ("system", "summarize this chat in 7 tokens or less. Refrain from using periods"),
         *messages,
     ])
@@ -198,8 +207,7 @@ async def new_tab(uuid, gradio_graph, messages, tabs, prompt, sidebar_summaries)
 
 
 def switch_tab(selected_uuid, tabs, gradio_graph, uuid, messages, prompt):
-    # I don't know of another way to lookup uuid other than
-    # by the button value
+    # I don't know of another way to lookup uuid other than by the button value
 
     # Save current state
     if messages:
@@ -321,20 +329,6 @@ if __name__ == "__main__":
         )
         with gr.Column():
             prompt_textbox = gr.Textbox(show_label=False, interactive=True)
-        with gr.Row():
-            checkbox_search_enabled = gr.Checkbox(
-                value=True,
-                label="Enable search",
-                show_label=True,
-                visible=search_enabled,
-                scale=1,
-            )
-            checkbox_download_website_text = gr.Checkbox(
-                value=True,
-                show_label=True,
-                label="Enable downloading text from urls",
-                scale=1,
-            )
         chatbot = gr.Chatbot(
             type="messages",
             scale=1,
@@ -475,9 +469,7 @@ if __name__ == "__main__":
             additional_inputs=[
                 current_langgraph_state,
                 current_uuid_state,
-                prompt_textbox,
-                checkbox_search_enabled,
-                checkbox_download_website_text,
+                prompt_textbox
             ],
             additional_outputs=[
                 current_langgraph_state,

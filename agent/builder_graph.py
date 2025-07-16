@@ -84,17 +84,26 @@ class AssistantAgent:
         return client
 
     async def setup_tools(self):
-        self.tools = await self.client.get_tools()
-        for tool in self.tools:
-            logger.info(f"Loaded Tool: {tool}")
+        try:
+            self.tools = await self.client.get_tools()
+            if not self.tools:
+                logger.warning("No tools loaded from MCP!")
+            for tool in self.tools:
+                logger.info(f"Loaded Tool: {tool}")
+        except Exception as e:
+            logger.error(f"Failed to load tools: {e}")
+            self.tools = []
 
 
     async def assistant_node(self, state: GraphProcessingState, config=None):
         """ Creating Assistant LangGraph Nodes
         """
+        if not self.llm:
+            raise RuntimeError("Failed to initialize LLM. Please check the provider or service.")
+
         assistant_model = self.llm.bind_tools(self.tools)
         if state.prompts:
-            final_prompt = "\n".join([state.prompt, self.system_prompt])
+            final_prompt = "\n".join([state.prompts, self.system_prompt])
         else:
             final_prompt = self.system_prompt
         # creating a chat prompt template with system messages along with user messages using placeholder
@@ -109,7 +118,7 @@ class AssistantAgent:
         return {"messages": response}
 
     @staticmethod
-    def tools_condition_edge(state: GraphProcessingState):
+    def tools_condition_edge(state: GraphProcessingState) -> str:
         # similar to tools_condition from langgraph.prebuilt.tool_node, but added logger for debugging
         # routes to ToolNode if tools called in the last message, else ENDS
         last_message = state.messages[-1]
@@ -133,7 +142,6 @@ class AssistantAgent:
             self.tools_condition_edge,
         )
         builder.add_edge("tools", "assistant")
-        builder.add_edge("assistant", END)
         # Compiling the graph
         return builder.compile()
 
