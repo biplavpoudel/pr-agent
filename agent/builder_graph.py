@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import os
 
 import httpx
 import asyncio
@@ -32,6 +33,7 @@ SYSTEM_PROMPT_PATH = Path("./prompts/system_prompt.txt")
 class GraphProcessingState(BaseModel):
     messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
     prompts: str = Field(default_factory=str, description="Prompts to be used by the agent")
+    project_dir: Path = Field(default_factory= lambda: Path(os.getcwd()))
 
 class AssistantAgent:
     def __init__(self, llm_provider:str, system_prompt_path: Path = SYSTEM_PROMPT_PATH):

@@ -52,24 +52,25 @@ DEFAULT_TEMPLATES = {
 @mcp.tool()
 async def create_pr(
         base_branch: str = "main",
-        working_directory: Optional[str] = None,
+        state: Optional[Dict] = None,
         title: Optional[str] = None,
         body: str = None) -> str:
     """Creates a new pull request on GitHub.
         Args:
             base_branch: Base branch into which user wants the code merged (default: main)
-            working_directory: Directory to run git commands in (default: current directory)
+            state: LangGraph state with the repo's  directory under the 'project_dir' key
             title: Title of the pull request
             body: Body of the pull request (in Markdown format)
     """
     try:
         # Using provided working directory else current directory
-        cwd = working_directory if working_directory else os.getcwd()
+        cwd = state.get("project_dir") if state else os.getcwd()
 
         response = subprocess.run(
             ["gh", "pr", "create", "--base", f"{base_branch}", "--title", f"{title}", "--body", f"{body}"],
             capture_output=True,
-            text=True
+            text=True,
+            cwd=cwd
         )
         if response.returncode != 0:
             logging.error("Failed to create pull request!")
@@ -87,7 +88,7 @@ async def analyze_file_changes(
     base_branch: str = "main",
     include_diff: bool = True,
     max_diff_lines: int = 500,
-    working_directory: Optional[str] = None,
+    state: Optional[Dict] = None,
 ) -> str:
     """Gets the full diff and list of changed files in the current git repository.
 
@@ -95,11 +96,11 @@ async def analyze_file_changes(
         base_branch: Base branch to compare against (default: main)
         include_diff: Include the full diff content (default: true)
         max_diff_lines: Maximum number of diff lines to include (default: 500)
-        working_directory: Directory to run git commands in (default: current directory)
+        state: LangGraph state with the repo's  directory under the 'project_dir' key
     """
     try:
         # Trying to get working directory from roots
-        if working_directory is None:
+        if state is None:
             try:
                 context = mcp.get_context()
                 roots_result = await context.session.list_roots()
@@ -112,7 +113,7 @@ async def analyze_file_changes(
                 pass
 
         # Using provided working directory else current directory
-        cwd = working_directory if working_directory else os.getcwd()
+        cwd = state.get("project_dir") if state else os.getcwd()
 
         # List of changed files
         diff_files = subprocess.run(
