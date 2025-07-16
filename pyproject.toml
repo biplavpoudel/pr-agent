@@ -16,6 +16,7 @@ dependencies = [
     "langchain-openai~=0.3.26",
     "langgraph~=0.5.0",
     "mcp~=1.10.1",
+    "notebook>=7.4.4",
     "pydantic~=2.11.7",
     "pytest~=8.4.1",
     "python-dotenv~=1.1.1",

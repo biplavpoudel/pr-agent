@@ -53,7 +53,7 @@ class AssistantAgent:
         provider = self.llm_provider
         try:
             if provider == "ollama":
-                return ChatOllama(model="qwen3:8b", temperature=0.2)
+                return ChatOllama(model="mistral:latest", temperature=0.1)
             elif provider == "gemini":
                 return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
             elif provider == "openai":
@@ -88,8 +88,8 @@ class AssistantAgent:
             self.tools = await self.client.get_tools()
             if not self.tools:
                 logger.warning("No tools loaded from MCP!")
-            for tool in self.tools:
-                logger.info(f"Loaded Tool: {tool}")
+            # for tool in self.tools:
+            #     logger.info(f"Loaded Tool: {tool}")
         except Exception as e:
             logger.error(f"Failed to load tools: {e}")
             self.tools = []
@@ -159,9 +159,8 @@ class AssistantAgent:
 
 async def main():
     agent = AssistantAgent(llm_provider="ollama")
-    response = await agent.ask("what are the tool names from the mcp servers?")
+    response = await agent.ask("create me an example of bugfix template.")
     print("\nFinal Response:\n", response["messages"][-1].content)
-
 
 
 if __name__ == "__main__":

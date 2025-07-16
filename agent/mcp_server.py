@@ -49,6 +49,38 @@ DEFAULT_TEMPLATES = {
     "security": "## 🔐 Security Update\n\n### 📄 Description\n\n### 🎯 Impact\n\n### 🛠️ Solution\n\n### ✅ Testing Checklist\n\n### 🔗 References",
 }
 
+@mcp.tool()
+async def create_pr(
+        base_branch: str = "main",
+        working_directory: Optional[str] = None,
+        title: Optional[str] = None,
+        body: str = None) -> str:
+    """Creates a new pull request on GitHub.
+        Args:
+            base_branch: Base branch into which user wants the code merged (default: main)
+            working_directory: Directory to run git commands in (default: current directory)
+            title: Title of the pull request
+            body: Body of the pull request (in Markdown format)
+    """
+    try:
+        # Using provided working directory else current directory
+        cwd = working_directory if working_directory else os.getcwd()
+
+        response = subprocess.run(
+            ["gh", "pr", "create", "--base", f"{base_branch}", "--title", f"{title}", "--body", f"{body}"],
+            capture_output=True,
+            text=True
+        )
+        if response.returncode != 0:
+            logging.error("Failed to create pull request!")
+            return json.dumps({"message": response.stderr})
+        return json.dumps({"message": response.stdout})
+
+    except subprocess.CalledProcessError as e:
+            return json.dumps({"error": f"Git error: {e.stderr}"})
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
 
 @mcp.tool()
 async def analyze_file_changes(

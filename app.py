@@ -34,8 +34,11 @@ with open(LOGGER_PATH, 'r') as config_file:
 logging.config.dictConfig(log_config)
 logger = logging.getLogger(__name__)
 
+SYSTEM_PROMPT_PATH = Path("./prompts/system_prompt.txt")
+sys_prompt = SYSTEM_PROMPT_PATH.read_text()
+
 async def get_graph_agent() -> Tuple[AssistantAgent, CompiledStateGraph]:
-    agent = AssistantAgent(llm_provider="ollama")
+    agent = AssistantAgent(llm_provider="gemini")
     graph = await agent.build_workflow()
     return agent, graph
 
@@ -202,7 +205,7 @@ async def new_tab(uuid, gradio_graph, messages, tabs, prompt, sidebar_summaries)
     for _ in range(FOLLOWUP_QUESTION_NUMBER):
         suggestion_buttons.append(gr.Button(visible=False))
     new_messages = {}
-    new_prompt = "You are a helpful assistant."
+    new_prompt = sys_prompt
     return new_uuid, new_graph, new_messages, tabs, new_prompt, sidebar_summaries, *suggestion_buttons
 
 
@@ -290,8 +293,8 @@ function triggerChatButtonClick() {
 }"""
 
 if __name__ == "__main__":
-    logger.info("Starting the interface")
-    with gr.Blocks(title="Langgraph Template", fill_height=True, css=CSS) as app:
+    logger.info("Starting the chat interface")
+    with gr.Blocks(title="Langgraph PR Agent", fill_height=True, css=CSS) as app:
         current_prompt_state = gr.BrowserState(
             storage_key="current_prompt_state",
             secret=BROWSER_STORAGE_SECRET,
@@ -340,6 +343,7 @@ if __name__ == "__main__":
             str()
         )
         prompt_textbox.change(lambda prompt: prompt, inputs=[prompt_textbox], outputs=[current_prompt_state])
+
         with gr.Sidebar() as sidebar:
             @gr.render(
                 inputs=[tab_edit_uuid_state, end_of_assistant_response_state, sidebar_names_state, current_uuid_state,
