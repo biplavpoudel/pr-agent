@@ -55,7 +55,7 @@ class AssistantAgent:
         provider = self.llm_provider
         try:
             if provider == "ollama":
-                return ChatOllama(model="mistral:latest", temperature=0.1)
+                return ChatOllama(model="qwen3:8b", temperature=0.3)
             elif provider == "gemini":
                 return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
             elif provider == "openai":

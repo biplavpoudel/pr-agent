@@ -58,13 +58,27 @@ async def create_pr(
     """Creates a new pull request on GitHub.
         Args:
             base_branch: Base branch into which user wants the code merged (default: main)
-            state: LangGraph state with the repo's  directory under the 'project_dir' key
+            state: LangGraph state with the repo's directory under the 'project_dir' key
             title: Title of the pull request
             body: Body of the pull request (in Markdown format)
     """
     try:
+        # Trying to get working directory from roots
+        current_dir = ""
+        if state is None:
+            try:
+                context = mcp.get_context()
+                roots_result = await context.session.list_roots()
+                root = roots_result.roots[0]
+                current_dir = root.uri.path
+
+            except (Exception, ValueError, RuntimeError) as e:
+                logging.error(
+                    f"Context unavailable outside of request. Context fallback triggered! {str(e)}")
+                pass
+
         # Using provided working directory else current directory
-        cwd = state.get("project_dir") if state else os.getcwd()
+        cwd = state.get("project_dir") if state else current_dir or os.getcwd()
 
         response = subprocess.run(
             ["gh", "pr", "create", "--base", f"{base_branch}", "--title", f"{title}", "--body", f"{body}"],
@@ -96,16 +110,18 @@ async def analyze_file_changes(
         base_branch: Base branch to compare against (default: main)
         include_diff: Include the full diff content (default: true)
         max_diff_lines: Maximum number of diff lines to include (default: 500)
-        state: LangGraph state with the repo's  directory under the 'project_dir' key
+        state: LangGraph state with the repo's directory under the 'project_dir' key
     """
     try:
         # Trying to get working directory from roots
+        working_dir = ""
         if state is None:
             try:
                 context = mcp.get_context()
                 roots_result = await context.session.list_roots()
                 root = roots_result.roots[0]
-                working_directory = root.uri.path
+                working_dir = root.uri.path
+
             except (Exception, ValueError, RuntimeError) as e:
                 logging.error(
                     f"Context unavailable outside of request. Context fallback triggered! {str(e)}"
@@ -113,7 +129,7 @@ async def analyze_file_changes(
                 pass
 
         # Using provided working directory else current directory
-        cwd = state.get("project_dir") if state else os.getcwd()
+        cwd = state.get("project_dir") if state else working_dir or os.getcwd()
 
         # List of changed files
         diff_files = subprocess.run(
@@ -188,8 +204,8 @@ async def analyze_file_changes(
 async def get_pr_templates() -> str:
     """List all available PR templates and their contents."""
 
-    if not any(file.endswith(".md") for file in os.listdir(TEMPLATES_DIR)):
-        await create_default_templates()
+    # if not any(file.endswith(".md") for file in os.listdir(TEMPLATES_DIR)):
+    #     await create_default_templates()
 
     template_types = {
         file.split(".")[0].capitalize().replace("_", " "): file
@@ -207,23 +223,23 @@ async def get_pr_templates() -> str:
 
     return json.dumps(templates, indent=2)
 
-@mcp.tool()
-async def create_default_templates() -> None:
-    """Create default PR templates and their contents if empty."""
-
-    for template_type in DEFAULT_TEMPLATES.keys():
-        file_path = TEMPLATES_DIR / f"{template_type}.md"
-        file_path.write_text(DEFAULT_TEMPLATES[template_type], encoding="utf-8")
-
-@mcp.tool()
-async def create_default_specific_template(template_path):
-    """Create a specified default PR template and its content if empty.
-    """
-
-    if not os.path.exists(template_path):
-        file_name = str(template_path).split("/")[-1].replace(".md", "")
-        content = DEFAULT_TEMPLATES[file_name]
-        template_path.write_text(content)
+# @mcp.tool()
+# async def create_default_templates() -> None:
+#     """Create default PR templates and their contents if empty."""
+#
+#     for template_type in DEFAULT_TEMPLATES.keys():
+#         file_path = TEMPLATES_DIR / f"{template_type}.md"
+#         file_path.write_text(DEFAULT_TEMPLATES[template_type], encoding="utf-8")
+#
+# @mcp.tool()
+# async def create_default_specific_template(template_path):
+#     """Create a specified default PR template and its content if empty.
+#     """
+#
+#     if not os.path.exists(template_path):
+#         file_name = str(template_path).split("/")[-1].replace(".md", "")
+#         content = DEFAULT_TEMPLATES[file_name]
+#         template_path.write_text(content)
 
 @mcp.tool()
 async def suggest_template(changes_summary: str, change_type: str) -> str:
