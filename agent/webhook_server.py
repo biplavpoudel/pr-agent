@@ -11,10 +11,14 @@ from fastapi.responses import JSONResponse
 import hmac
 import hashlib
 import os
+
+from dotenv import load_dotenv
+load_dotenv()
+
 # Initializing FastAPI application to receive POST request from GitHub webhook
 app = FastAPI()
 # Path to store git events
-EVENTS_FILE = Path(__file__).parent / "events_git.json"
+EVENTS_FILE = Path(__file__).parent.parent / "events_git.json"
 @app.get("/")
 async def root():
     return JSONResponse({"message": "GitHub Actions Webhook Server is running."})
@@ -33,6 +37,7 @@ async def is_valid_signature(raw_payload: bytes, signature: str=Header(None)) ->
 async def handle_webhook(request:Request) -> Response:
     """Handles incoming GitHub webhook."""
     raw_payload = await request.body()
+    print("📦 Raw Payload:", raw_payload)
     signature = request.headers.get("X-Hub-Signature-256", "")
     if not await is_valid_signature(raw_payload, signature):
         return JSONResponse(content={"detail": "Invalid signature"}, status_code=401)
