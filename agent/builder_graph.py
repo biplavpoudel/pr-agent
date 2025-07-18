@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-import os
 
 import httpx
 import asyncio
@@ -33,7 +32,6 @@ SYSTEM_PROMPT_PATH = Path("./prompts/system_prompt.txt")
 class GraphProcessingState(BaseModel):
     messages: Annotated[list[BaseMessage], add_messages] = Field(default_factory=list)
     prompts: str = Field(default_factory=str, description="Prompts to be used by the agent")
-    project_dir: Path = Field(default_factory= lambda: Path(os.getcwd()))
 
 class AssistantAgent:
     def __init__(self, llm_provider:str, system_prompt_path: Path = SYSTEM_PROMPT_PATH):
@@ -161,9 +159,11 @@ class AssistantAgent:
 
 async def main():
     agent = AssistantAgent(llm_provider="ollama")
-    response = await agent.ask("create me an example of bugfix template.")
-    print("\nFinal Response:\n", response["messages"][-1].content)
-
+    tools = await agent.init_mcp_client().get_tools()
+    # response = await agent.ask("create me an example of bugfix template.")
+    # print("\nFinal Response:\n", response["messages"][-1].content)
+    mcp_tools = {tool.name: tool.description.split(".")[0] for tool in tools}
+    print("\nMCP Tools:\n", mcp_tools)
 
 if __name__ == "__main__":
     asyncio.run(main())

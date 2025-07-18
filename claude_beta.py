@@ -40,6 +40,7 @@ else:
 # Initialize agent globally
 agent = None
 graph = None
+mcp_tools = {}
 
 # Global stop flag with thread-safe access
 stop_generation = threading.Event()
@@ -47,11 +48,13 @@ stop_generation = threading.Event()
 
 async def initialize_agent():
     """Initialize the agent and graph once"""
-    global agent, graph
+    global agent, graph, mcp_tools
     if agent is None:
         agent = AssistantAgent(llm_provider="gemini")
         graph = await agent.build_workflow()
-    return agent, graph
+        tools = await agent.init_mcp_client().get_tools()
+        mcp_tools = {tool.name: tool.description.split(".")[0] for tool in tools}
+    return agent, graph, mcp_tools
 
 
 class ChatState:
@@ -59,7 +62,7 @@ class ChatState:
 
     def __init__(self):
         self.messages = []
-        self.graph_state = {"messages": [], "prompts": ""}
+        self.graph_state = {"messages": [], "prompts": "", "project_dir": None}
         self.session_id = str(uuid4())
 
     def add_message(self, message):
@@ -72,9 +75,16 @@ class ChatState:
     def set_prompt(self, prompt):
         self.graph_state["prompts"] = prompt
 
+    def set_project_dir(self, project_dir: str):
+        """Set the project directory in the graph state"""
+        if project_dir:
+            self.graph_state["project_dir"] = project_dir
+        else:
+            self.graph_state["project_dir"] = os.getcwd()
+
     def clear(self):
         self.messages = []
-        self.graph_state = {"messages": [], "prompts": ""}
+        self.graph_state = {"messages": [], "prompts": "", "project_dir": None}
         self.session_id = str(uuid4())
 
 
@@ -88,20 +98,26 @@ async def chat_response(message: str, history: List, system_prompt: str) -> Asyn
         # Initialize agent if needed
         await initialize_agent()
 
-        # Update system prompt if changed
-        if system_prompt.strip():
-            chat_state.set_prompt(system_prompt)
-
-        # Add user message
-        user_msg = HumanMessage(content=message[:USER_INPUT_MAX_LENGTH])
-        chat_state.add_message(user_msg)
-
         # Configure the graph run
         config = RunnableConfig(
             recursion_limit=RECURSION_LIMIT,
             run_name="pr-agent-chat",
-            configurable={"thread_id": chat_state.session_id}
+            configurable={
+                "thread_id": chat_state.session_id,
+                "project_dir": chat_state.graph_state.get("project_dir")}
         )
+        # logger.info(f"Running tools with project_dir: {chat_state.graph_state['project_dir']}")
+
+        # Update system prompt if changed
+        if system_prompt.strip():
+            system_prompt = f"{DEFAULT_PROMPT}\nCurrent project directory: {chat_state.graph_state['project_dir']}"
+            chat_state.set_prompt(system_prompt)
+
+        logger.info(f"System Prompt is: {chat_state.graph_state['prompts']}")
+
+        # Add user message
+        user_msg = HumanMessage(content=message[:USER_INPUT_MAX_LENGTH])
+        chat_state.add_message(user_msg)
 
         # Stream the response
         full_response = ""
@@ -162,19 +178,17 @@ def get_project_directories():
     return [
         "Current Directory",
         "~/Documents/HuggingFace Courses/pr-agent",
-        "~/Documents/projects/my-app",
-        "~/Documents/projects/web-app",
-        "~/workspace/backend-api",
-        "~/workspace/frontend-react",
-        "/tmp/test-project"
+        "~/Documents/Projects/Algorithms by Sedgewick/assignments"
     ]
 
 
 def create_quick_actions():
     """Create quick action buttons for common tasks"""
     return [
+        ("🧲 Create Pull Request", "Create a pull request with the current changes using the suggested template"),
         ("📝 Suggest PR Template", "Analyze my current changes and suggest the most appropriate PR template"),
         ("🔍 Analyze Changes", "Use analyze_file_changes to show me what files have been modified"),
+        ("📝 Deployment Summary", "Create a summary of recent deployments and CI/CD status"),
         ("📊 Generate Report", "Create a comprehensive PR status report with CI/CD status"),
         ("🚨 Check CI Status", "Get the current GitHub Actions workflow status"),
         ("📢 Send Slack Update", "Check recent CI events and send a team notification to Slack"),
@@ -185,8 +199,10 @@ def create_quick_actions():
 def handle_quick_action(action_text: str) -> str:
     """Handle quick action button clicks"""
     action_map = {
+        "🧲 Create Pull Request": "Create a pull request with the current changes using the suggested template",
         "📝 Suggest PR Template": "Analyze my current changes and suggest the most appropriate PR template",
         "🔍 Analyze Changes": "Use analyze_file_changes to show me what files have been modified in my current branch",
+        "📝 Deployment Summary": "Create a summary of recent deployments and CI/CD status",
         "📊 Generate Report": "Generate a comprehensive PR status report including CI/CD results and file changes",
         "🚨 Check CI Status": "Check the current status of all GitHub Actions workflows",
         "📢 Send Slack Update": "Check recent CI events and send a summary notification to our team Slack channel",
@@ -194,13 +210,16 @@ def handle_quick_action(action_text: str) -> str:
     }
     return action_map.get(action_text, action_text)
 
-async def process_chat_response(message: str, history: List, system_prompt: str, project_dir: str):
+async def process_chat_response(message: str, history: List[dict], system_prompt: str, project_dir: str):
     """Wrapper to handle async chat response with proper event loop"""
+    if project_dir == "Current Directory":
+        project_dir = os.getcwd()
+
     if not message.strip():
         yield history
 
     stop_generation.clear()
-    chat_state.graph_state["project_dir"] = Path(project_dir) if project_dir else None
+    chat_state.graph_state["project_dir"] = Path(os.path.expanduser(project_dir)) if project_dir else os.getcwd()
 
     # Directly append user input
     history.append({"role": "user", "content": message})
@@ -222,9 +241,11 @@ def stop_chat():
     stop_generation.set()
     return "⏹️ Stopping generation..."
 
-
-def create_interface():
+async def create_interface():
     """Create the main Gradio interface"""
+    # Ensure agent and tools are initialized
+    await initialize_agent()
+
     with gr.Blocks(title="GitHub PR Agent", css=CSS, theme=gr.themes.Soft()) as app:
         gr.Markdown("# 🤖 GitHub PR Agent")
         gr.Markdown("Your AI assistant for GitHub Pull Requests, CI/CD monitoring, and team notifications.")
@@ -237,12 +258,12 @@ def create_interface():
 
                 action_buttons = []
                 with gr.Row():
-                    for i, (label, _) in enumerate(quick_actions[:3]):
+                    for i, (label, _) in enumerate(quick_actions[:4]):
                         btn = gr.Button(label, elem_classes=["quick-action-btn"], scale=1)
                         action_buttons.append(btn)
 
                 with gr.Row():
-                    for i, (label, _) in enumerate(quick_actions[3:]):
+                    for i, (label, _) in enumerate(quick_actions[-4:]):
                         btn = gr.Button(label, elem_classes=["quick-action-btn"], scale=1)
                         action_buttons.append(btn)
 
@@ -251,20 +272,24 @@ def create_interface():
                     chatbot = gr.Chatbot(
                         height=500,
                         show_copy_button=True,
-                        avatar_images=("👤", "🤖"),
-                        type="messages"
+                        avatar_images=("./static/human.png", "./static/robot.png"),
+                        type="messages",
+                        layout="panel",
                     )
 
                     with gr.Row():
-                        msg_input = gr.Textbox(
-                            placeholder="Ask me about PR templates, CI status, or team notifications...",
-                            show_label=False,
-                            scale=4,
-                            lines=2
-                        )
-                        submit_btn = gr.Button("Send", variant="primary", scale=1)
-                        stop_btn = gr.Button("Stop", variant="stop", scale=1)
-                        clear_btn = gr.Button("Clear", variant="secondary", scale=1)
+                        with gr.Column(scale=8):
+                            msg_input = gr.Textbox(
+                                placeholder="Ask me about PR templates, CI status, or team notifications...",
+                                show_label=False,
+                                lines=3,
+                            )
+                        with gr.Column(scale=2):
+                            with gr.Row(equal_height=True):
+                                submit_btn = gr.Button("Send", variant="primary", min_width=2)
+                                stop_btn = gr.Button("Stop", variant="stop", min_width=2)
+                            with gr.Row():
+                                clear_btn = gr.Button("Clear", variant="secondary", scale=1)
 
             with gr.Column(scale=1):
                 gr.Markdown("### Project Directory")
@@ -272,7 +297,8 @@ def create_interface():
                     choices=get_project_directories(),
                     value="Current Directory",
                     label="Select Project Directory",
-                    interactive=True
+                    interactive=True,
+                    container=True
                 )
 
                 gr.Markdown("### System Prompt")
@@ -284,16 +310,12 @@ def create_interface():
                     elem_classes=["system-prompt"]
                 )
 
-                gr.Markdown("### Available Tools")
-                tools_info = gr.Markdown("""
-                **🔧 Available Tools:**
-                - `analyze_file_changes`: Check git diff and file changes
-                - `suggest_template`: Get appropriate PR template
-                - `create_pr`: Create GitHub pull request
-                - `get_workflow_status`: Check CI/CD status
-                - `send_slack_notification`: Send team updates
-                - `get_recent_actions_events`: View webhook events
-                - Various prompt templates for different scenarios
+                gr.Markdown("### 🔧 Available Tools")
+                # Dynamically generate the markdown string
+                tools_md = "\n".join(
+                    f"- `{name}`: {desc}" for name, desc in mcp_tools.items()
+                )
+                gr.Markdown(f"""{tools_md}
                 """)
 
         # Event handlers
@@ -369,7 +391,7 @@ async def main():
     # await initialize_agent()
 
     # Create and launch interface
-    app = create_interface()
+    app = await create_interface()
 
     # Launch with custom settings
     app.launch(

@@ -52,20 +52,19 @@ DEFAULT_TEMPLATES = {
 @mcp.tool()
 async def create_pr(
         base_branch: str = "main",
-        state: dict = None,
+        working_dir: str = None,
         title: Optional[str] = None,
         body: str = None) -> str:
     """Creates a new pull request on GitHub.
         Args:
             base_branch: Base branch into which user wants the code merged (default: main)
-            state: LangGraph state with the repo's dictory under the 'project_dir' key
+            working_dir: Directory to run git commands in (default: current directory)
             title: Title of the pull request
             body: Body of the pull request (in Markdown format)
     """
     try:
         # Trying to get working directory from roots
-        current_dir = ""
-        if state is None:
+        if working_dir is None:
             try:
                 context = mcp.get_context()
                 roots_result = await context.session.list_roots()
@@ -78,7 +77,7 @@ async def create_pr(
                 pass
 
         # Using provided working directory else current directory
-        cwd = state.get("project_dir") if state else current_dir or os.getcwd()
+        cwd = Path(working_dir) if working_dir else os.getcwd()
 
         response = subprocess.run(
             ["gh", "pr", "create", "--base", f"{base_branch}", "--title", f"{title}", "--body", f"{body}"],
@@ -102,7 +101,7 @@ async def analyze_file_changes(
     base_branch: str = "main",
     include_diff: bool = True,
     max_diff_lines: int = 500,
-    state: dict = None,
+    working_dir: str = None,
 ) -> str:
     """Gets the full diff and list of changed files in the current git repository.
 
@@ -110,15 +109,16 @@ async def analyze_file_changes(
         base_branch: Base branch to compare against (default: main)
         include_diff: Include the full diff content (default: true)
         max_diff_lines: Maximum number of diff lines to include (default: 500)
-        state: LangGraph state with the repo's directory under the 'project_dir' key
+        working_dir: Directory to run git commands in (default: current directory)
     """
     try:
         # Trying to get working directory from roots
-        working_dir = ""
-        if state is None:
+
+        if working_dir is None:
             try:
                 context = mcp.get_context()
                 roots_result = await context.session.list_roots()
+                logging.info("Roots found: %s", roots_result.roots)
                 root = roots_result.roots[0]
                 working_dir = root.uri.path
 
@@ -129,7 +129,7 @@ async def analyze_file_changes(
                 pass
 
         # Using provided working directory else current directory
-        cwd = state.get("project_dir") if state else working_dir or os.getcwd()
+        cwd = Path(working_dir) if working_dir else os.getcwd()
 
         # List of changed files
         diff_files = subprocess.run(
