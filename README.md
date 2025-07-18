@@ -5,6 +5,8 @@ This repository is inspired by the excellent [mcp-course](https://github.com/hug
 The primary goal of this repository is to reimplement the system using the **LangGraph** framework and allow the use of **custom LLMs** (e.g., OpenAI, Mistral, Gemini, etc.), rather than being restricted to **Claude Code** as in the original implementation.
 
 ---
+<img width="1045" height="1013" alt="pr-agent-gradio" src="https://github.com/user-attachments/assets/76c14295-a443-432c-a7f4-206d42b4e0ff" />
+
 
 ### 🧩 Core Components
 
