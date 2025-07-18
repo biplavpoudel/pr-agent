@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
+import json
 import os
 import logging
 from pathlib import Path
@@ -175,11 +176,31 @@ def clear_chat():
 
 def get_project_directories():
     """Get list of project directories - you can customize this"""
-    return [
-        "Current Directory",
-        "~/Documents/HuggingFace Courses/pr-agent",
-        "~/Documents/Projects/Algorithms by Sedgewick/assignments"
-    ]
+    dirs_path = Path("./project_dirs.json")
+    if not dirs_path.exists():
+        return ["Current Directory"]
+    else:
+        with open(dirs_path, 'r') as f:
+            directories = json.load(f)
+        return ["Current Directory"] + directories.get("directories", [])
+
+def add_project_directory(new_path: str):
+    """Add a new project directory to the JSON file"""
+    dirs_path = Path("./project_dirs.json")
+    if not dirs_path.exists():
+        # Create the file if it doesn't exist
+        with open(dirs_path, 'w') as f:
+            json.dump({"directories": []}, f)
+
+    with open(dirs_path, 'r') as f:
+        directories = json.load(f)
+
+    # Add the new path if it's not already in the list
+    if new_path not in directories.get("directories", []):
+        directories["directories"].append(new_path)
+        with open(dirs_path, 'w') as f:
+            json.dump(directories, f, indent=2)
+
 
 
 def create_quick_actions():
@@ -301,6 +322,24 @@ async def create_interface():
                     container=True
                 )
 
+                gr.Markdown("### Add Custom Project Directory")
+                custom_path_input = gr.Textbox(
+                    placeholder="Enter custom project directory path...",
+                    label="Custom Path",
+                    interactive=True
+                )
+                add_path_btn = gr.Button("Add Path")
+
+                def update_dropdown(new_path):
+                    add_project_directory(new_path)
+                    return get_project_directories()
+
+                add_path_btn.click(
+                    fn=update_dropdown,
+                    inputs=[custom_path_input],
+                    outputs=[project_dir_dropdown]
+                )
+
                 gr.Markdown("### System Prompt")
                 system_prompt = gr.Textbox(
                     value=DEFAULT_PROMPT,
@@ -310,13 +349,13 @@ async def create_interface():
                     elem_classes=["system-prompt"]
                 )
 
-                gr.Markdown("### 🔧 Available Tools")
-                # Dynamically generate the markdown string
-                tools_md = "\n".join(
-                    f"- `{name}`: {desc}" for name, desc in mcp_tools.items()
-                )
-                gr.Markdown(f"""{tools_md}
-                """)
+                # gr.Markdown("### 🔧 Available Tools")
+                # # Dynamically generate the markdown string
+                # tools_md = "\n".join(
+                #     f"- `{name}`: {desc}" for name, desc in mcp_tools.items()
+                # )
+                # gr.Markdown(f"""{tools_md}
+                # """)
 
         # Event handlers
         submit_btn.click(
@@ -364,21 +403,35 @@ async def create_interface():
                 ["Help me troubleshoot the failing test workflow"],
                 ["Generate a comprehensive PR report"],
                 ["What files have changed in my current branch?"],
+                ["Create a pull request with the suggested template"],
             ],
             inputs=[msg_input]
         )
 
-        # Footer with instructions
+        # # Footer with instructions
+        # gr.Markdown("""
+        # ---
+        # **💡 Tips:**
+        # - Select your project directory from the dropdown above
+        # - Use quick actions for common tasks
+        # - The agent can analyze your git repository and suggest appropriate PR templates
+        # - System prompt can be customized for specific team workflows
+        # - Use the Stop button to halt generation if needed
+        # - All tools work with your selected git repository and GitHub webhooks
+        # """)
+
+
+        # Markdown to showcase available tools
         gr.Markdown("""
         ---
-        **💡 Tips:**
-        - Select your project directory from the dropdown above
-        - Use quick actions for common tasks
-        - The agent can analyze your git repository and suggest appropriate PR templates
-        - System prompt can be customized for specific team workflows
-        - Use the Stop button to halt generation if needed
-        - All tools work with your selected git repository and GitHub webhooks
+        ### 🔧 Available Tools""")
+        # Dynamically generate the markdown string
+        tools_md = "\n".join(
+            f"- `{name}`: {desc}" for name, desc in mcp_tools.items()
+        )
+        gr.Markdown(f"""{tools_md}
         """)
+
 
     return app
 
