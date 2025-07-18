@@ -1,572 +1,460 @@
 #!/usr/bin/env python3
 import asyncio
+import json
 import os
 import logging
-import logging.config
 from pathlib import Path
-from typing import Any, AsyncGenerator, Tuple, Union
-from uuid import uuid4, UUID
-import json
+from typing import AsyncGenerator, List, Tuple
+from uuid import uuid4
+import threading
 
 import gradio as gr
 from dotenv import load_dotenv
-from langchain_core.messages import HumanMessage, BaseMessage, AIMessage
-from langgraph.graph.state import CompiledStateGraph
+from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.types import RunnableConfig
-from pydantic import BaseModel
 
 load_dotenv()
 
+# Import your existing components
 from agent.builder_graph import AssistantAgent, GraphProcessingState
 
-FOLLOWUP_QUESTION_NUMBER = 3
-TRIM_MESSAGE_LENGTH = 16  # Includes tool messages
-USER_INPUT_MAX_LENGTH = 10000  # Characters
+# Configuration
+USER_INPUT_MAX_LENGTH = 8000
+TRIM_MESSAGE_LENGTH = 12
+RECURSION_LIMIT = 15
 
-# Using Same secret for data persistence
-BROWSER_STORAGE_SECRET = "itsnosecret"
-
-# Loading config file
-LOGGER_PATH = Path('./logger_config.json')
-with open(LOGGER_PATH, 'r') as config_file:
-    log_config = json.load(config_file)
-
-logging.config.dictConfig(log_config)
+# Setup logging
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Custom CSS for modern, intuitive design
+css_path = Path("./static/ui.css")
+CSS = css_path.read_text() if os.path.exists(css_path) else " "
+
+# Load system prompt
 SYSTEM_PROMPT_PATH = Path("./prompts/system_prompt.txt")
-sys_prompt = SYSTEM_PROMPT_PATH.read_text()
+if SYSTEM_PROMPT_PATH.exists():
+    DEFAULT_PROMPT = SYSTEM_PROMPT_PATH.read_text()
+else:
+    DEFAULT_PROMPT = "You are a helpful GitHub PR assistant."
 
-async def get_graph_agent() -> Tuple[AssistantAgent, CompiledStateGraph]:
-    agent = AssistantAgent(llm_provider="gemini")
-    graph = await agent.build_workflow()
-    return agent, graph
+# Initialize agent globally
+agent = None
+graph = None
+mcp_tools = {}
 
-agent, graph = asyncio.run(get_graph_agent())
+# Global stop flag with thread-safe access
+stop_generation = threading.Event()
 
 
-async def chat_fn(user_input: str, history: dict, input_graph_state: dict, uuid: UUID, prompt: str) -> AsyncGenerator[Tuple[str, Union[dict|Any], Union[bool|Any]], None]:
-    """
-    Args:
-        user_input (str): The user's input message.
-        history (dict): The conversation history in Gradio (not used directly in the graph).
-        input_graph_state (dict): The current state of the graph, including tool call history.
-        uuid (UUID): A unique identifier for the current conversation, useful for LangGraph or memory tracking.
-        prompt (str): The system prompt to guide responses.
+async def initialize_agent():
+    """Initialize the agent and graph once"""
+    global agent, graph, mcp_tools
+    if agent is None:
+        agent = AssistantAgent(llm_provider="gemini")
+        graph = await agent.build_workflow()
+        tools = await agent.init_mcp_client().get_tools()
+        mcp_tools = {tool.name: tool.description.split(".")[0] for tool in tools}
+    return agent, graph, mcp_tools
 
-    Returns:
-        Tuple[str, dict|Any, bool|Any]
 
-            - str: The output message.
-            - dict | Any: The final state of the graph.
-            - bool | Any: A flag indicating whether to trigger follow-up questions.
+class ChatState:
+    """Simple state management for chat"""
 
-    Note:
-        Gradio history is not used in the graph directly, as ordered `ToolMessage` objects are preferred.
-        Instead, `GraphProcessingState['messages']` is used to represent history.
-    """
+    def __init__(self):
+        self.messages = []
+        self.graph_state = {"messages": [], "prompts": "", "project_dir": None}
+        self.session_id = str(uuid4())
 
+    def add_message(self, message):
+        self.messages.append(message)
+        self.graph_state["messages"].append(message)
+        # Keep only recent messages to save tokens
+        if len(self.graph_state["messages"]) > TRIM_MESSAGE_LENGTH:
+            self.graph_state["messages"] = self.graph_state["messages"][-TRIM_MESSAGE_LENGTH:]
+
+    def set_prompt(self, prompt):
+        self.graph_state["prompts"] = prompt
+
+    def set_project_dir(self, project_dir: str):
+        """Set the project directory in the graph state"""
+        if project_dir:
+            self.graph_state["project_dir"] = project_dir
+        else:
+            self.graph_state["project_dir"] = os.getcwd()
+
+    def clear(self):
+        self.messages = []
+        self.graph_state = {"messages": [], "prompts": "", "project_dir": None}
+        self.session_id = str(uuid4())
+
+
+# Global chat state
+chat_state = ChatState()
+
+
+async def chat_response(message: str, history: List, system_prompt: str) -> AsyncGenerator[str, None]:
+    """Main chat function with streaming response"""
     try:
-        logger.info(f"Prompt: {prompt}")
+        # Initialize agent if needed
+        await initialize_agent()
 
-        if prompt:
-            input_graph_state["prompts"] = prompt
-        if "messages" not in input_graph_state:
-            input_graph_state["messages"] = []
-
-        input_graph_state["messages"].append(
-            HumanMessage(user_input[:USER_INPUT_MAX_LENGTH])
-        )
-        input_graph_state["messages"] = input_graph_state["messages"][-TRIM_MESSAGE_LENGTH:]
-
+        # Configure the graph run
         config = RunnableConfig(
-            recursion_limit=20,
+            recursion_limit=RECURSION_LIMIT,
             run_name="pr-agent-chat",
-            configurable={"thread_id": uuid}
+            configurable={
+                "thread_id": chat_state.session_id,
+                "project_dir": chat_state.graph_state.get("project_dir")}
         )
+        logger.info(f"Running tools with project_dir: {chat_state.graph_state['project_dir']}")
 
-        output: str = ""
-        final_state: BaseModel | Any = {}
-        waiting_output_seq: list[str] = []
+        # Update system prompt if changed
+        if system_prompt.strip():
+            system_prompt = f"{DEFAULT_PROMPT}\nCurrent project directory: {chat_state.graph_state['project_dir']}"
+            chat_state.set_prompt(system_prompt)
+
+        logger.info(f"System Prompt is: {chat_state.graph_state['prompts']}")
+
+        # Add user message
+        user_msg = HumanMessage(content=message[:USER_INPUT_MAX_LENGTH])
+        chat_state.add_message(user_msg)
+
+        # Stream the response
+        full_response = ""
+        tool_calls_made = []
 
         async for stream_mode, chunk in graph.astream(
-                input_graph_state,
+                chat_state.graph_state,
                 config=config,
-                stream_mode=["values", "messages"],
+                stream_mode=["values", "messages"]
         ):
+            # Check stop flag
+            if stop_generation.is_set():
+                yield full_response + "\n\n⏹️ Generation stopped by user."
+                break
+
             if stream_mode == "values":
-                final_state = chunk
-                last_message = chunk["messages"][-1]
-                if hasattr(last_message, "tool_calls"):
-                    for msg_tool_call in last_message.tool_calls:
-                        tool_name: str = msg_tool_call['name']
-                        waiting_output_seq.append(f"Running Tool: {tool_name.upper()}...")
-                        yield "\n".join(waiting_output_seq), gr.skip(), gr.skip()
+                # Check for tool calls
+                if chunk.get("messages"):
+                    last_message = chunk["messages"][-1]
+                    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+                        for tool_call in last_message.tool_calls:
+                            tool_name = tool_call.get('name', 'unknown')
+                            if tool_name not in tool_calls_made:
+                                tool_calls_made.append(tool_name)
+                                full_response += f"🔧 Running tool: {tool_name}...\n\n"
+                                yield full_response
+
+                # Update chat state with final values
+                chat_state.graph_state = chunk
+
             elif stream_mode == "messages":
                 msg, metadata = chunk
-                logger.debug(f"output: {msg} | metadata: {metadata}")
-                # assistant is the name we defined in the langgraph graph for assistant_node
-                if metadata['langgraph_node'] == "assistant" and msg.content:
-                    output += msg.content
-                    yield output, gr.skip(), gr.skip()
-        # Trigger for asking follow-up questions
-        # + store the graph state for next iteration
-        # yield output, dict(final_state), gr.skip()
-        yield output + " ", dict(final_state), True
-    except Exception:
-        logger.exception("Exception occurred!")
-        user_error_message = "There was an error processing your request. Please try again."
-        yield user_error_message, gr.skip(), False
+                # Only stream assistant messages
+                if (metadata.get('langgraph_node') == "assistant" and
+                        hasattr(msg, 'content') and msg.content):
+                    full_response += msg.content
+                    yield full_response
+
+        # Add assistant response to state
+        if full_response and not stop_generation.is_set():
+            assistant_msg = AIMessage(content=full_response)
+            chat_state.add_message(assistant_msg)
+
+    except Exception as e:
+        logger.error(f"Error in chat_response: {e}")
+        yield "❌ An error occurred. Please try again or check the logs."
 
 
-def clear():
-    return dict(), uuid4()
+def clear_chat():
+    """Clear chat history"""
+    stop_generation.set()  # Stop any ongoing generation
+    chat_state.clear()
+    return []
 
 
-class FollowupQuestions(BaseModel):
-    """Model for langchain to use for structured output for followup questions"""
-    questions: list[str]
+def get_project_directories():
+    """Get list of project directories - you can customize this"""
+    dirs_path = Path("./project_dirs.json")
+    if not dirs_path.exists():
+        return ["Current Directory"]
+    else:
+        with open(dirs_path, 'r') as f:
+            directories = json.load(f)
+        return ["Current Directory"] + directories.get("directories", [])
+
+def add_project_directory(new_path: str):
+    """Add a new project directory to the JSON file"""
+    dirs_path = Path("./project_dirs.json")
+    if not dirs_path.exists():
+        # Create the file if it doesn't exist
+        with open(dirs_path, 'w') as f:
+            json.dump({"directories": []}, f)
+
+    with open(dirs_path, 'r') as f:
+        directories = json.load(f)
+
+    # Add the new path if it's not already in the list
+    if new_path not in directories.get("directories", []):
+        directories["directories"].append(new_path)
+        with open(dirs_path, 'w') as f:
+            json.dump(directories, f, indent=2)
 
 
-async def populate_followup_questions(end_of_chat_response: bool, messages: list[BaseMessage], uuid: UUID):
-    """
-    This function gets called a lot due to the asynchronous nature of streaming
 
-    Only populate followup questions if streaming has completed and the message is coming from the assistant
-    """
-    if not end_of_chat_response or not messages or not isinstance(messages[-1], AIMessage):
-        return *[gr.skip() for _ in range(FOLLOWUP_QUESTION_NUMBER)], False
-    config = RunnableConfig(
-        run_name="populate_followup_questions",
-        configurable={"thread_id": uuid}
-    )
-
-    model_with_config = agent.llm.with_config(config)
-    follow_up_questions = await model_with_config.with_structured_output(FollowupQuestions).ainvoke([
-        ("system",
-         f"suggest {FOLLOWUP_QUESTION_NUMBER} followup questions for the user to ask the assistant. Refrain from asking personal questions."),
-        *messages,
-    ])
-    if len(follow_up_questions.questions) != FOLLOWUP_QUESTION_NUMBER:
-        raise ValueError("Invalid value of followup questions")
-    buttons = []
-    for i in range(FOLLOWUP_QUESTION_NUMBER):
-        buttons.append(
-            gr.Button(follow_up_questions.questions[i], visible=True, elem_classes="chat-tab"),
-        )
-    return *buttons, False
+def create_quick_actions():
+    """Create quick action buttons for common tasks"""
+    return [
+        ("🧲 Create Pull Request", "Create a pull request with the current changes using the suggested template"),
+        ("📝 Suggest PR Template", "Analyze my current changes and suggest the most appropriate PR template"),
+        ("🔍 Analyze Changes", "Use analyze_file_changes to show me what files have been modified"),
+        ("📝 Deployment Summary", "Create a summary of recent deployments and CI/CD status"),
+        ("📊 Generate Report", "Create a comprehensive PR status report with CI/CD status"),
+        ("🚨 Check CI Status", "Get the current GitHub Actions workflow status"),
+        ("📢 Send Slack Update", "Check recent CI events and send a team notification to Slack"),
+        ("🔧 Troubleshoot Failures", "Help me troubleshoot any failing GitHub Actions workflows"),
+    ]
 
 
-async def summarize_chat(end_of_chat_response: bool, messages: list[BaseMessage], sidebar_summaries: dict, uuid: UUID):
-    """Summarize chat for tab names"""
-    # print("\n------------------------")
-    # print("not end_of_chat_response", not end_of_chat_response)
-    # print("not messages", not messages)
-    # if messages:
-    #     print("messages[-1][role] != assistant", messages[-1]["role"] != "assistant")
-    # print("isinstance(sidebar_summaries, type(lambda x: x))", isinstance(sidebar_summaries, type(lambda x: x)))
-    # print("uuid in sidebar_summaries", uuid in sidebar_summaries)
-    should_return = (
-            not end_of_chat_response or
-            not messages or
-            messages[-1]["role"] != "assistant" or
-            # This is a bug with gradio
-            isinstance(sidebar_summaries, type(lambda x: x)) or
-            # Already created summary
-            uuid in sidebar_summaries
-    )
-    if should_return:
-        return gr.skip(), gr.skip()
-    config = RunnableConfig(
-        run_name="summarize_chat",
-        configurable={"thread_id": uuid}
-    )
-    model_with_config = agent.llm.with_config(config)
-    summary_response = await model_with_config.ainvoke([
-        ("system", "summarize this chat in 7 tokens or less. Refrain from using periods"),
-        *messages,
-    ])
-    if uuid not in sidebar_summaries:
-        sidebar_summaries[uuid] = summary_response.content
-    return sidebar_summaries, False
-
-
-async def new_tab(uuid, gradio_graph, messages, tabs, prompt, sidebar_summaries):
-    new_uuid = uuid4()
-    new_graph = {}
-    if uuid not in sidebar_summaries:
-        sidebar_summaries, _ = await summarize_chat(True, messages, sidebar_summaries, uuid)
-    tabs[uuid] = {
-        "graph": gradio_graph,
-        "messages": messages,
-        "prompt": prompt,
+def handle_quick_action(action_text: str) -> str:
+    """Handle quick action button clicks"""
+    action_map = {
+        "🧲 Create Pull Request": "Create a pull request with the current changes using the suggested template",
+        "📝 Suggest PR Template": "Analyze my current changes and suggest the most appropriate PR template",
+        "🔍 Analyze Changes": "Use analyze_file_changes to show me what files have been modified in my current branch",
+        "📝 Deployment Summary": "Create a summary of recent deployments and CI/CD status",
+        "📊 Generate Report": "Generate a comprehensive PR status report including CI/CD results and file changes",
+        "🚨 Check CI Status": "Check the current status of all GitHub Actions workflows",
+        "📢 Send Slack Update": "Check recent CI events and send a summary notification to our team Slack channel",
+        "🔧 Troubleshoot Failures": "Help me troubleshoot any failing GitHub Actions workflows with specific recommendations",
     }
-    suggestion_buttons = []
-    for _ in range(FOLLOWUP_QUESTION_NUMBER):
-        suggestion_buttons.append(gr.Button(visible=False))
-    new_messages = {}
-    new_prompt = sys_prompt
-    return new_uuid, new_graph, new_messages, tabs, new_prompt, sidebar_summaries, *suggestion_buttons
+    return action_map.get(action_text, action_text)
+
+async def process_chat_response(message: str, history: List[dict], system_prompt: str, project_dir: str):
+    """Wrapper to handle async chat response with proper event loop"""
+    if project_dir == "Current Directory":
+        project_dir = os.getcwd()
+
+    if not message.strip():
+        yield history
+
+    stop_generation.clear()
+    chat_state.graph_state["project_dir"] = Path(os.path.expanduser(project_dir)) if project_dir else os.getcwd()
+
+    # Directly append user input
+    history.append({"role": "user", "content": message})
+
+    response = ""
+    try:
+        async for chunk in chat_response(message, history, system_prompt):
+            # Update assistant response in history
+            history.append({"role": "assistant", "content": chunk})
+            yield history
+    except Exception as e:
+        logger.exception(f"❌ Error in process_chat_response.")
+        history.append({"role": "assistant", "content": "❌ An error occurred. Please try again."})
+        yield history
 
 
-def switch_tab(selected_uuid, tabs, gradio_graph, uuid, messages, prompt):
-    # I don't know of another way to lookup uuid other than by the button value
+def stop_chat():
+    """Stop the current generation"""
+    stop_generation.set()
+    return "⏹️ Stopping generation..."
 
-    # Save current state
-    if messages:
-        tabs[uuid] = {
-            "graph": gradio_graph,
-            "messages": messages,
-            "prompt": prompt
-        }
+async def create_interface():
+    """Create the main Gradio interface"""
+    # Ensure agent and tools are initialized
+    await initialize_agent()
 
-    if selected_uuid not in tabs:
-        logger.error(f"Could not find the selected tab in offloaded_tabs_data_storage {selected_uuid}")
-        return gr.skip(), gr.skip(), gr.skip(), gr.skip()
-    selected_tab_state = tabs[selected_uuid]
-    selected_graph = selected_tab_state["graph"]
-    selected_messages = selected_tab_state["messages"]
-    selected_prompt = selected_tab_state.get("prompt", "")
-    suggestion_buttons = []
-    for _ in range(FOLLOWUP_QUESTION_NUMBER):
-        suggestion_buttons.append(gr.Button(visible=False))
-    return selected_graph, selected_uuid, selected_messages, tabs, selected_prompt, *suggestion_buttons
+    with gr.Blocks(title="GitHub PR Agent", css=CSS, theme=gr.themes.Soft()) as app:
+        gr.Markdown("# 🤖 GitHub PR Agent")
+        gr.Markdown("Your AI assistant for GitHub Pull Requests, CI/CD monitoring, and team notifications.")
 
-
-def delete_tab(current_chat_uuid, selected_uuid, sidebar_summaries, tabs):
-    output_messages = gr.skip()
-    if current_chat_uuid == selected_uuid:
-        output_messages = dict()
-    if selected_uuid in tabs:
-        del tabs[selected_uuid]
-    if selected_uuid in sidebar_summaries:
-        del sidebar_summaries[selected_uuid]
-    return sidebar_summaries, tabs, output_messages
-
-
-def submit_edit_tab(selected_uuid, sidebar_summaries, text):
-    sidebar_summaries[selected_uuid] = text
-    return sidebar_summaries, ""
-
-
-CSS = """
-footer {visibility: hidden}
-.followup-question-button {font-size: 12px }
-.chat-tab {
-    font-size: 12px;
-    padding-inline: 0;
-}
-.chat-tab.active {
-    background-color: #654343;
-}
-#new-chat-button { background-color: #0f0f11; color: white; }
-
-.tab-button-control {
-    min-width: 0;
-    padding-left: 0;
-    padding-right: 0;
-}
-"""
-
-# We set the ChatInterface textbox id to chat-textbox for this to work
-TRIGGER_CHATINTERFACE_BUTTON = """
-function triggerChatButtonClick() {
-
-  // Find the div with id "chat-textbox"
-  const chatTextbox = document.getElementById("chat-textbox");
-
-  if (!chatTextbox) {
-    console.error("Error: Could not find element with id 'chat-textbox'");
-    return;
-  }
-
-  // Find the button that is a descendant of the div
-  const button = chatTextbox.querySelector("button");
-
-  if (!button) {
-    console.error("Error: No button found inside the chat-textbox element");
-    return;
-  }
-
-  // Trigger the click event
-  button.click();
-}"""
-
-if __name__ == "__main__":
-    logger.info("Starting the chat interface")
-    with gr.Blocks(title="Langgraph PR Agent", fill_height=True, css=CSS) as app:
-        current_prompt_state = gr.BrowserState(
-            storage_key="current_prompt_state",
-            secret=BROWSER_STORAGE_SECRET,
-        )
-        current_uuid_state = gr.BrowserState(
-            uuid4,
-            storage_key="current_uuid_state",
-            secret=BROWSER_STORAGE_SECRET,
-        )
-        current_langgraph_state = gr.BrowserState(
-            dict(),
-            storage_key="current_langgraph_state",
-            secret=BROWSER_STORAGE_SECRET,
-        )
-        end_of_assistant_response_state = gr.State(
-            bool(),
-        )
-        # [uuid] -> summary of chat
-        sidebar_names_state = gr.BrowserState(
-            dict(),
-            storage_key="sidebar_names_state",
-            secret=BROWSER_STORAGE_SECRET,
-        )
-        # [uuid] -> {"graph": gradio_graph, "messages": messages}
-        offloaded_tabs_data_storage = gr.BrowserState(
-            dict(),
-            storage_key="offloaded_tabs_data_storage",
-            secret=BROWSER_STORAGE_SECRET,
-        )
-
-        chatbot_message_storage = gr.BrowserState(
-            [],
-            storage_key="chatbot_message_storage",
-            secret=BROWSER_STORAGE_SECRET,
-        )
-        with gr.Column():
-            prompt_textbox = gr.Textbox(show_label=False, interactive=True)
-        chatbot = gr.Chatbot(
-            type="messages",
-            scale=1,
-            show_copy_button=True,
-            height=600,
-            editable="all",
-        )
-        tab_edit_uuid_state = gr.State(
-            str()
-        )
-        prompt_textbox.change(lambda prompt: prompt, inputs=[prompt_textbox], outputs=[current_prompt_state])
-
-        with gr.Sidebar() as sidebar:
-            @gr.render(
-                inputs=[tab_edit_uuid_state, end_of_assistant_response_state, sidebar_names_state, current_uuid_state,
-                        chatbot, offloaded_tabs_data_storage])
-            def render_chats(tab_uuid_edit, end_of_chat_response, sidebar_summaries, active_uuid, messages, tabs):
-                current_tab_button_text = ""
-                if active_uuid not in sidebar_summaries:
-                    current_tab_button_text = "Current Chat"
-                elif active_uuid not in tabs:
-                    current_tab_button_text = sidebar_summaries[active_uuid]
-                if current_tab_button_text:
-                    gr.Button(current_tab_button_text, elem_classes=["chat-tab", "active"])
-                for chat_uuid, tab in reversed(tabs.items()):
-                    elem_classes = ["chat-tab"]
-                    if chat_uuid == active_uuid:
-                        elem_classes.append("active")
-                    button_uuid_state = gr.State(chat_uuid)
-                    with gr.Row():
-                        clear_tab_button = gr.Button(
-                            "🗑",
-                            scale=0,
-                            elem_classes=["tab-button-control"]
-                        )
-                        clear_tab_button.click(
-                            fn=delete_tab,
-                            inputs=[
-                                current_uuid_state,
-                                button_uuid_state,
-                                sidebar_names_state,
-                                offloaded_tabs_data_storage
-                            ],
-                            outputs=[
-                                sidebar_names_state,
-                                offloaded_tabs_data_storage,
-                                chat_interface.chatbot_value
-                            ]
-                        )
-                        chat_button_text = sidebar_summaries.get(chat_uuid)
-                        if not chat_button_text:
-                            chat_button_text = str(chat_uuid)
-                        if chat_uuid != tab_uuid_edit:
-                            set_edit_tab_button = gr.Button(
-                                "✎",
-                                scale=0,
-                                elem_classes=["tab-button-control"]
-                            )
-                            set_edit_tab_button.click(
-                                fn=lambda x: x,
-                                inputs=[button_uuid_state],
-                                outputs=[tab_edit_uuid_state]
-                            )
-                            chat_tab_button = gr.Button(
-                                chat_button_text,
-                                elem_id=f"chat-{chat_uuid}-button",
-                                elem_classes=elem_classes,
-                                scale=2
-                            )
-                            chat_tab_button.click(
-                                fn=switch_tab,
-                                inputs=[
-                                    button_uuid_state,
-                                    offloaded_tabs_data_storage,
-                                    current_langgraph_state,
-                                    current_uuid_state,
-                                    chatbot,
-                                    prompt_textbox
-                                ],
-                                outputs=[
-                                    current_langgraph_state,
-                                    current_uuid_state,
-                                    chat_interface.chatbot_value,
-                                    offloaded_tabs_data_storage,
-                                    prompt_textbox,
-                                    *followup_question_buttons
-                                ]
-                            )
-                        else:
-                            chat_tab_text = gr.Textbox(
-                                chat_button_text,
-                                scale=2,
-                                interactive=True,
-                                show_label=False
-                            )
-                            chat_tab_text.submit(
-                                fn=submit_edit_tab,
-                                inputs=[
-                                    button_uuid_state,
-                                    sidebar_names_state,
-                                    chat_tab_text
-                                ],
-                                outputs=[
-                                    sidebar_names_state,
-                                    tab_edit_uuid_state
-                                ]
-                            )
-                    # )
-                # return chat_tabs, sidebar_summaries
-
-
-            new_chat_button = gr.Button("New Chat", elem_id="new-chat-button")
-        chatbot.clear(fn=clear, outputs=[current_langgraph_state, current_uuid_state])
         with gr.Row():
-            followup_question_buttons = []
-            for i in range(FOLLOWUP_QUESTION_NUMBER):
-                btn = gr.Button(f"Button {i + 1}", visible=False)
-                followup_question_buttons.append(btn)
+            with gr.Column(scale=3):
+                # Quick Actions
+                gr.Markdown("### Quick Actions")
+                quick_actions = create_quick_actions()
 
-        multimodal = False
-        textbox_component = (
-            gr.MultimodalTextbox if multimodal else gr.Textbox
+                action_buttons = []
+                with gr.Row():
+                    for i, (label, _) in enumerate(quick_actions[:4]):
+                        btn = gr.Button(label, elem_classes=["quick-action-btn"], scale=1)
+                        action_buttons.append(btn)
+
+                with gr.Row():
+                    for i, (label, _) in enumerate(quick_actions[-4:]):
+                        btn = gr.Button(label, elem_classes=["quick-action-btn"], scale=1)
+                        action_buttons.append(btn)
+
+                # Chat Interface
+                with gr.Column(elem_classes=["chat-container"]):
+                    chatbot = gr.Chatbot(
+                        height=500,
+                        show_copy_button=True,
+                        avatar_images=("./static/human.png", "./static/robot.png"),
+                        type="messages",
+                        # layout="panel", # gives modern look
+                    )
+
+                    with gr.Row():
+                        with gr.Column(scale=8):
+                            msg_input = gr.Textbox(
+                                placeholder="Ask me about PR templates, CI status, or team notifications...",
+                                show_label=False,
+                                lines=3,
+                            )
+                        with gr.Column(scale=2):
+                            with gr.Row(equal_height=True):
+                                submit_btn = gr.Button("Send", variant="primary", min_width=2)
+                                stop_btn = gr.Button("Stop", variant="stop", min_width=2)
+                            with gr.Row():
+                                clear_btn = gr.Button("Clear", variant="huggingface", scale=1)
+
+            with gr.Column(scale=1):
+                gr.Markdown("### Project Directory")
+                project_dir_dropdown = gr.Dropdown(
+                    choices=get_project_directories(),
+                    value="Current Directory",
+                    label="Select Project Directory",
+                    interactive=True,
+                    container=True
+                )
+
+                gr.Markdown("### Add Custom Project Directory")
+                custom_path_input = gr.Textbox(
+                    placeholder="Enter custom project directory path...",
+                    label="Custom Path",
+                    interactive=True
+                )
+                add_path_btn = gr.Button("Add Path")
+
+                def update_dropdown(new_path):
+                    add_project_directory(new_path)
+                    return get_project_directories()
+
+                add_path_btn.click(
+                    fn=update_dropdown,
+                    inputs=[custom_path_input],
+                    outputs=[project_dir_dropdown]
+                )
+
+                gr.Markdown("### System Prompt")
+                system_prompt = gr.Textbox(
+                    value=DEFAULT_PROMPT,
+                    placeholder="System prompt for the agent...",
+                    lines=8,
+                    show_label=False,
+                    elem_classes=["system-prompt"]
+                )
+
+                # gr.Markdown("### 🔧 Available Tools")
+                # # Dynamically generate the markdown string
+                # tools_md = "\n".join(
+                #     f"- `{name}`: {desc}" for name, desc in mcp_tools.items()
+                # )
+                # gr.Markdown(f"""{tools_md}
+                # """)
+
+        # Event handlers
+        submit_btn.click(
+            fn=process_chat_response,
+            inputs=[msg_input, chatbot, system_prompt, project_dir_dropdown],
+            outputs=[chatbot]
+        ).then(
+            fn=lambda: "",
+            outputs=[msg_input]
         )
-        with gr.Column():
-            textbox = textbox_component(
-                show_label=False,
-                label="Message",
-                placeholder="Type a message...",
-                scale=7,
-                autofocus=True,
-                submit_btn=True,
-                stop_btn=True,
-                elem_id="chat-textbox",
-                lines=1,
+
+        msg_input.submit(
+            fn=process_chat_response,
+            inputs=[msg_input, chatbot, system_prompt, project_dir_dropdown],
+            outputs=[chatbot],
+            queue=True
+        ).then(
+            fn=lambda: "",
+            outputs=[msg_input]
+        )
+
+        stop_btn.click(
+            fn=stop_chat,
+            outputs=[msg_input]
+        )
+
+        clear_btn.click(
+            fn=clear_chat,
+            outputs=[chatbot]
+        )
+
+        # Quick action handlers
+        for i, (label, action) in enumerate(quick_actions):
+            action_buttons[i].click(
+                fn=lambda action=action: action,
+                outputs=[msg_input]
             )
-        chat_interface = gr.ChatInterface(
-            chatbot=chatbot,
-            fn=chat_fn,
-            additional_inputs=[
-                current_langgraph_state,
-                current_uuid_state,
-                prompt_textbox
+
+        # Examples
+        gr.Examples(
+            examples=[
+                ["What PR template should I use for my bug fix?"],
+                ["Check the status of our CI/CD pipelines"],
+                ["Send a summary of recent deployments to Slack"],
+                ["Help me troubleshoot the failing test workflow"],
+                ["Generate a comprehensive PR report"],
+                ["What files have changed in my current branch?"],
+                ["Create a pull request with the suggested template"],
             ],
-            additional_outputs=[
-                current_langgraph_state,
-                end_of_assistant_response_state
-            ],
-            type="messages",
-            multimodal=multimodal,
-            textbox=textbox,
+            inputs=[msg_input]
         )
 
-        new_chat_button.click(
-            new_tab,
-            inputs=[
-                current_uuid_state,
-                current_langgraph_state,
-                chatbot,
-                offloaded_tabs_data_storage,
-                prompt_textbox,
-                sidebar_names_state,
-            ],
-            outputs=[
-                current_uuid_state,
-                current_langgraph_state,
-                chat_interface.chatbot_value,
-                offloaded_tabs_data_storage,
-                prompt_textbox,
-                sidebar_names_state,
-                *followup_question_buttons,
-            ]
+        # # Footer with instructions
+        # gr.Markdown("""
+        # ---
+        # **💡 Tips:**
+        # - Select your project directory from the dropdown above
+        # - Use quick actions for common tasks
+        # - The agent can analyze your git repository and suggest appropriate PR templates
+        # - System prompt can be customized for specific team workflows
+        # - Use the Stop button to halt generation if needed
+        # - All tools work with your selected git repository and GitHub webhooks
+        # """)
+
+
+        # Markdown to showcase available tools
+        gr.Markdown("""
+        ---
+        ### 🔧 Available Tools""")
+        # Dynamically generate the markdown string
+        tools_md = "\n".join(
+            f"- `{name}`: {desc}" for name, desc in mcp_tools.items()
         )
+        gr.Markdown(f"""{tools_md}
+        """)
 
 
-        def click_followup_button(btn):
-            buttons = [gr.Button(visible=False) for _ in range(len(followup_question_buttons))]
-            return btn, *buttons
+    return app
 
 
-        for btn in followup_question_buttons:
-            btn.click(
-                fn=click_followup_button,
-                inputs=[btn],
-                outputs=[
-                    chat_interface.textbox,
-                    *followup_question_buttons
-                ]
-            ).success(lambda: None, js=TRIGGER_CHATINTERFACE_BUTTON)
+async def main():
+    """Main function to run the app"""
 
-        chatbot.change(
-            fn=populate_followup_questions,
-            inputs=[
-                end_of_assistant_response_state,
-                chatbot,
-                current_uuid_state
-            ],
-            outputs=[
-                *followup_question_buttons,
-                end_of_assistant_response_state
-            ],
-            trigger_mode="multiple"
-        )
-        chatbot.change(
-            fn=summarize_chat,
-            inputs=[
-                end_of_assistant_response_state,
-                chatbot,
-                sidebar_names_state,
-                current_uuid_state
-            ],
-            outputs=[
-                sidebar_names_state,
-                end_of_assistant_response_state
-            ],
-            trigger_mode="multiple"
-        )
-        chatbot.change(
-            fn=lambda x: x,
-            inputs=[chatbot],
-            outputs=[chatbot_message_storage],
-            trigger_mode="always_last"
-        )
+    # Initialize agent on startup
+    # No need to initialize agent manually, it's lazy-loaded
+    # await initialize_agent()
 
+    # Create and launch interface
+    app = await create_interface()
 
-        @app.load(inputs=[chatbot_message_storage], outputs=[chat_interface.chatbot_value])
-        def load_messages(messages):
-            return messages
-
-
-        @app.load(inputs=[current_prompt_state], outputs=[prompt_textbox])
-        def load_prompt(current_prompt):
-            return current_prompt
-
+    # Launch with custom settings
     app.launch(
         server_name="127.0.0.1",
         server_port=int(os.getenv("GRADIO_SERVER_PORT", 7860)),
-        # favicon_path="assets/favicon.ico"
+        share=False,
+        show_error=True,
+        quiet=False
     )
+
+
+if __name__ == "__main__":
+    asyncio.run(main())

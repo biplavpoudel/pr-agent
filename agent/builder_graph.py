@@ -53,7 +53,7 @@ class AssistantAgent:
         provider = self.llm_provider
         try:
             if provider == "ollama":
-                return ChatOllama(model="mistral:latest", temperature=0.1)
+                return ChatOllama(model="qwen3:8b", temperature=0.3)
             elif provider == "gemini":
                 return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0.1)
             elif provider == "openai":
@@ -159,9 +159,11 @@ class AssistantAgent:
 
 async def main():
     agent = AssistantAgent(llm_provider="ollama")
-    response = await agent.ask("create me an example of bugfix template.")
-    print("\nFinal Response:\n", response["messages"][-1].content)
-
+    tools = await agent.init_mcp_client().get_tools()
+    # response = await agent.ask("create me an example of bugfix template.")
+    # print("\nFinal Response:\n", response["messages"][-1].content)
+    mcp_tools = {tool.name: tool.description.split(".")[0] for tool in tools}
+    print("\nMCP Tools:\n", mcp_tools)
 
 if __name__ == "__main__":
     asyncio.run(main())
