@@ -52,13 +52,13 @@ DEFAULT_TEMPLATES = {
 @mcp.tool()
 async def create_pr(
         base_branch: str = "main",
-        state: Optional[Dict] = None,
+        state: dict = None,
         title: Optional[str] = None,
         body: str = None) -> str:
     """Creates a new pull request on GitHub.
         Args:
             base_branch: Base branch into which user wants the code merged (default: main)
-            state: LangGraph state with the repo's directory under the 'project_dir' key
+            state: LangGraph state with the repo's dictory under the 'project_dir' key
             title: Title of the pull request
             body: Body of the pull request (in Markdown format)
     """
@@ -102,7 +102,7 @@ async def analyze_file_changes(
     base_branch: str = "main",
     include_diff: bool = True,
     max_diff_lines: int = 500,
-    state: Optional[Dict] = None,
+    state: dict = None,
 ) -> str:
     """Gets the full diff and list of changed files in the current git repository.
 
