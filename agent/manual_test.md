@@ -10,10 +10,10 @@ This guide provides curl-based tests so you can verify your implementation witho
 
 ## Test 1: Direct Slack Tool Test
 
-Test your `send_slack_notification` tool directly via Claude Code:
+Test your `send_slack_notification` tool directly via Agent Code:
 
 ```bash
-# Start your MCP server and connect with Claude Code, then ask:
+# Start your MCP server and connect with Agent Code, then ask:
 # "Send a test message to Slack: 'Hello from MCP Course Module 3!'"
 ```
 
@@ -91,19 +91,19 @@ curl -X POST http://localhost:8080/webhook/github \
 
 ## Test 3: End-to-End Workflow Tests
 
-After sending the webhook events above, test the complete workflow via Claude Code:
+After sending the webhook events above, test the complete workflow via Agent Code:
 
 ### 3a. Test Failure Alert Workflow
 
-Ask Claude Code:
+Ask Agent:
 ```
 "Check recent CI events, find any failures, format them as a Slack alert, and send to the team"
 ```
 
 Expected workflow:
-1. Claude calls `get_recent_actions_events()` → finds failure event
-2. Claude calls `format_ci_failure_alert()` → generates formatted message
-3. Claude calls `send_slack_notification()` → sends to Slack
+1. Agent calls `get_recent_actions_events()` → finds failure event
+2. Agent calls `format_ci_failure_alert()` → generates formatted message
+3. Agent calls `send_slack_notification()` → sends to Slack
 
 Expected Slack message:
 ```
@@ -123,15 +123,15 @@ Expected Slack message:
 
 ### 3b. Test Success Summary Workflow
 
-Ask Claude Code:
+Ask Agent:
 ```
 "Check recent CI events, find any successful deployments, format them as a celebration message, and send to the team"
 ```
 
 Expected workflow:
-1. Claude calls `get_recent_actions_events()` → finds success event
-2. Claude calls `format_ci_success_summary()` → generates formatted message  
-3. Claude calls `send_slack_notification()` → sends to Slack
+1. Agent calls `get_recent_actions_events()` → finds success event
+2. Agent calls `format_ci_success_summary()` → generates formatted message  
+3. Agent calls `send_slack_notification()` → sends to Slack
 
 Expected Slack message:
 ```
@@ -156,7 +156,7 @@ Expected Slack message:
 # Temporarily unset the environment variable
 unset SLACK_WEBHOOK_URL
 
-# Ask Claude Code to send a message
+# Ask Agent Code to send a message
 # Expected: Error message about missing environment variable
 ```
 
@@ -166,7 +166,7 @@ unset SLACK_WEBHOOK_URL
 # Set invalid webhook URL
 export SLACK_WEBHOOK_URL="https://invalid-webhook-url.com/test"
 
-# Ask Claude Code to send a message  
+# Ask Agent Code to send a message  
 # Expected: Error message about connection failure
 ```
 
@@ -182,14 +182,14 @@ Test the formatting prompts without sending to Slack:
 
 ### 5a. Test Failure Alert Prompt
 
-Ask Claude Code:
+Ask Agent Code:
 ```
 "Use the format_ci_failure_alert prompt to create a failure message for the recent CI failure, but don't send it to Slack yet"
 ```
 
 ### 5b. Test Success Summary Prompt
 
-Ask Claude Code:
+Ask Agent:
 ```
 "Use the format_ci_success_summary prompt to create a success message for the recent deployment, but don't send it to Slack yet"
 ```
@@ -200,14 +200,14 @@ Test that all previous module functionality still works:
 
 ### 6a. Module 1 Integration
 
-Ask Claude Code:
+Ask Agent:
 ```
 "Analyze current file changes, suggest a PR template, then create a Slack message about the PR status"
 ```
 
 ### 6b. Module 2 Integration
 
-Ask Claude Code:
+Ask Agent Code:
 ```
 "Check workflow status, analyze the CI results, and create a comprehensive team update for Slack"
 ```
@@ -224,7 +224,7 @@ After running these tests, verify:
 - [ ] Prompts work independently (Test 5)
 - [ ] Integration with previous modules works (Test 6)
 - [ ] Slack messages display with proper formatting
-- [ ] All tools and prompts are accessible to Claude Code
+- [ ] All tools and prompts are accessible to Agent Code
 
 ## Troubleshooting
 
