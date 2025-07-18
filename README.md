@@ -43,9 +43,12 @@ The primary goal of this repository is to reimplement the system using the **Lan
 
 ---
 ### 🧑‍💻 Using the agent
-1. Head to agent directory:
-   `cd agent`
-2. Start the MCP server:
-   ` python mcp_server.py`
-3. In next terminal, expose webhook_server using Cloudflare Tunnel:
+1. Head to agent directory: `cd agent`
+2. Start the MCP server: `python mcp_server.py`
+3. Start the Webhook server: `python agent/webhook_server.py`
+4. In next terminal, expose webhook_server using Cloudflare Tunnel:
    `cloudflared tunnel run webhook-tunnel`
+5. To test the local webhook server, you can use:
+   `curl http://localhost:8080/webhook`
+6. To test the webhook server using tunnel, you can use:
+   `curl https://webhook.example.com/webhook`
